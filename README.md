@@ -7,7 +7,7 @@ D2² (D2 squared) is D2 × D2. It combines two projects that are both called D2.
 
 Together they make D2 diagrams draggable. You can move a box into a group, drag the end of an arrow onto another box, or place a box where you want it. Each drag is saved as a small edit to your `.d2` file, so the text stays the source of truth.
 
-![D2 squared moving a box into a group](docs/screenshot.png)
+![D2 squared after moving Billing into the Data group](docs/screenshot.png)
 
 ## Try it
 
