@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -32,12 +33,23 @@ type Candidate struct {
 	landID string
 }
 
+var errTalaOnly = errors.New("Placing boxes needs the TALA layout engine")
+
+func plainCandidate(ctx context.Context, source, clean string, e Edit, landID, label string) (*Candidate, error) {
+	layout, err := layoutWith(ctx, clean, engineLayout(previewSeeds))
+	if err != nil {
+		return nil, err
+	}
+	landing, _ := layout.shape(landID)
+	return &Candidate{Label: label, Edit: e, Landing: landing, Diff: diffLines(source, clean, 1), layout: layout, source: clean, landID: landID}, nil
+}
+
 func (c *Candidate) hugGroups(ctx context.Context, sized map[string]bool) error {
 	hugged, err := hug(c.source, sized)
 	if err != nil || hugged == c.source {
 		return err
 	}
-	layout, err := layoutWith(ctx, hugged, talaLayout(previewSeeds))
+	layout, err := layoutWith(ctx, hugged, engineLayout(previewSeeds))
 	if err != nil {
 		return err
 	}
@@ -75,6 +87,7 @@ func init() {
 	Register(direction{}, "direction", "unpin")
 	Register(tidy{}, "tidy")
 	Register(resize{}, "resize")
+	Register(configure{}, "config")
 }
 
 func hasTarget(b Behavior, l *Layout, t Target) bool {
@@ -100,7 +113,7 @@ func markPinned(l *Layout, source string) (*Layout, error) {
 	out := *l
 	out.Shapes = append([]Shape(nil), l.Shapes...)
 	for i := range out.Shapes {
-		out.Shapes[i].Pinned = pinned[out.Shapes[i].ID]
+		out.Shapes[i].Pinned = l.tala() && pinned[out.Shapes[i].ID]
 	}
 	return &out, nil
 }
@@ -163,6 +176,13 @@ func (reparent) Build(ctx context.Context, base *Layout, source string, e Edit) 
 		return nil, err
 	}
 	newID := movedID(e)
+	label := "into " + e.To
+	if e.To == "" {
+		label = "to top level"
+	}
+	if !base.tala() {
+		return plainCandidate(ctx, source, clean, e, newID, label)
+	}
 	var outside []string
 	for _, s := range base.Shapes {
 		if !within(s.ID, e.Key) {
@@ -173,7 +193,7 @@ func (reparent) Build(ctx context.Context, base *Layout, source string, e Edit) 
 	if err != nil {
 		return nil, err
 	}
-	layout, err := layoutWith(ctx, pinned, talaLayout(previewSeeds))
+	layout, err := layoutWith(ctx, pinned, engineLayout(previewSeeds))
 	if err != nil {
 		return nil, err
 	}
@@ -191,10 +211,6 @@ func (reparent) Build(ctx context.Context, base *Layout, source string, e Edit) 
 		return nil, err
 	}
 	landing, _ := layout.shape(newID)
-	label := "into " + e.To
-	if e.To == "" {
-		label = "to top level"
-	}
 	return &Candidate{Label: label, Edit: e, Landing: landing, Diff: diffLines(source, clean, 1),
 		PinLines: countAdded(clean, final), layout: layout, source: final, landID: newID}, nil
 }
@@ -244,11 +260,18 @@ func (reconnect) Build(ctx context.Context, base *Layout, source string, e Edit)
 	if err != nil {
 		return nil, err
 	}
-	pinned, err := pinSource(clean, allIDs(base), base.shapeMap())
-	if err != nil {
-		return nil, err
+	table := e.To
+	if _, ok := base.shape(table); !ok {
+		table = parentID(table)
 	}
-	layout, err := layoutWith(ctx, pinned, routeOnly(base, "", 0, 0))
+	pinned, run := clean, engineLayout(previewSeeds)
+	if base.tala() {
+		if pinned, err = pinSource(clean, allIDs(base), base.shapeMap()); err != nil {
+			return nil, err
+		}
+		run = fixedLayout(routeOnly(base, "", 0, 0))
+	}
+	layout, err := layoutWith(ctx, pinned, run)
 	if err != nil {
 		return nil, err
 	}
@@ -256,10 +279,6 @@ func (reconnect) Build(ctx context.Context, base *Layout, source string, e Edit)
 		return nil, err
 	}
 	old, _ := base.conn(e.Key)
-	table := e.To
-	if _, ok := base.shape(table); !ok {
-		table = parentID(table)
-	}
 	src, dst := old.Src, table
 	if e.End == "src" {
 		src, dst = table, old.Dst
@@ -285,6 +304,9 @@ func (pin) Targets(l *Layout) []Target { return reparent{}.Targets(l) }
 func (pin) Candidates(*Layout, Target, Point) []Edit { return nil }
 
 func (pin) Build(ctx context.Context, base *Layout, source string, e Edit) (*Candidate, error) {
+	if !base.tala() {
+		return nil, errTalaOnly
+	}
 	moved, ok := base.shape(e.Key)
 	if !ok {
 		return nil, errUnknownShape(e.Key)
@@ -302,9 +324,9 @@ func (pin) Build(ctx context.Context, base *Layout, source string, e Edit) (*Can
 	if err != nil {
 		return nil, err
 	}
-	run := routeOnly(base, e.Key, float64(dx), float64(dy))
+	run := fixedLayout(routeOnly(base, e.Key, float64(dx), float64(dy)))
 	if parentID(e.Key) != "" {
-		run = talaLayout(previewSeeds)
+		run = engineLayout(previewSeeds)
 	}
 	layout, err := layoutWith(ctx, pinned, run)
 	if err != nil {
@@ -342,7 +364,7 @@ func (direction) Build(ctx context.Context, base *Layout, source string, e Edit)
 		}
 		label = fmt.Sprintf("direction %s", e.To)
 	}
-	layout, err := layoutWith(ctx, clean, talaLayout(previewSeeds))
+	layout, err := layoutWith(ctx, clean, engineLayout(previewSeeds))
 	if err != nil {
 		return nil, err
 	}
@@ -379,11 +401,13 @@ func (tidy) Build(ctx context.Context, base *Layout, source string, e Edit) (*Ca
 		}
 	}
 	clean := format(g)
-	pinned, err := pinSource(clean, outside, base.shapeMap())
-	if err != nil {
-		return nil, err
+	pinned := clean
+	if base.tala() {
+		if pinned, err = pinSource(clean, outside, base.shapeMap()); err != nil {
+			return nil, err
+		}
 	}
-	layout, err := layoutWith(ctx, pinned, talaLayout(previewSeeds))
+	layout, err := layoutWith(ctx, pinned, engineLayout(previewSeeds))
 	if err != nil {
 		return nil, err
 	}
@@ -404,6 +428,9 @@ func (resize) Targets(*Layout) []Target { return nil }
 func (resize) Candidates(*Layout, Target, Point) []Edit { return nil }
 
 func (resize) Build(ctx context.Context, base *Layout, source string, e Edit) (*Candidate, error) {
+	if !base.tala() {
+		return nil, errTalaOnly
+	}
 	s, ok := base.shape(e.Key)
 	if !ok {
 		return nil, errUnknownShape(e.Key)
@@ -427,7 +454,7 @@ func (resize) Build(ctx context.Context, base *Layout, source string, e Edit) (*
 		return nil, err
 	}
 	sized := format(g)
-	layout, err := layoutWith(ctx, sized, talaLayout(previewSeeds))
+	layout, err := layoutWith(ctx, sized, engineLayout(previewSeeds))
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,8 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/andybalholm/cascadia v1.3.4 // indirect
+	github.com/d2lang/dagro v0.2.1 // indirect
+	github.com/d2lang/elk-go v0.2.0 // indirect
 	github.com/d2lang/mathjax-go v0.1.0 // indirect
 	github.com/d2lang/rough-go v0.2.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect

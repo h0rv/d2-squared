@@ -122,7 +122,7 @@ func (s *Session) push(stack *[]View) {
 
 func (s *Session) Open(source string) (View, error) {
 	started := time.Now()
-	layout, err := layoutWith(context.Background(), source, talaLayout(s.seeds))
+	layout, err := layoutWith(context.Background(), source, engineLayout(s.seeds))
 	if err != nil {
 		return View{}, err
 	}
@@ -135,7 +135,7 @@ func (s *Session) Open(source string) (View, error) {
 
 func (s *Session) Reload(source string) (View, error) {
 	started := time.Now()
-	layout, err := layoutWith(context.Background(), source, talaLayout(s.seeds))
+	layout, err := layoutWith(context.Background(), source, engineLayout(s.seeds))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
@@ -224,8 +224,10 @@ func (s *Session) compute(ctx context.Context, v View, e Edit, key string) (*Can
 		return nil, err
 	}
 	sized := remapSized(v.Layout.userSized, e)
-	if err := c.hugGroups(ctx, sized); err != nil {
-		return nil, err
+	if c.layout.tala() {
+		if err := c.hugGroups(ctx, sized); err != nil {
+			return nil, err
+		}
 	}
 	c.layout.userSized = sized
 	c.Key = e.ID()
@@ -303,7 +305,7 @@ func (s *Session) Route(t Target, delta Point, version int64) ([]Path, error) {
 	if v.Layout == nil || (version != 0 && version != v.Version) {
 		return nil, ErrStale
 	}
-	if t.Kind != "node" {
+	if t.Kind != "node" || !v.Layout.tala() {
 		return []Path{}, nil
 	}
 	return v.Layout.reroute(t.ID, delta.X, delta.Y)
@@ -368,7 +370,7 @@ func (s *Session) Verify(ctx context.Context) (Drift, error) {
 	if v.Layout == nil {
 		return Drift{}, errNoLayer
 	}
-	fresh, err := layoutWith(ctx, v.Source, talaLayout(s.seeds))
+	fresh, err := layoutWith(ctx, v.Source, engineLayout(s.seeds))
 	if err != nil {
 		return Drift{}, err
 	}

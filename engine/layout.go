@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/d2lang/d2/d2graph"
+	"github.com/d2lang/d2/d2layouts/d2dagrelayout"
+	"github.com/d2lang/d2/d2layouts/d2elklayout"
 	"github.com/d2lang/d2/d2layouts/d2talalayout"
 	"github.com/d2lang/d2/d2lib"
 	"github.com/d2lang/d2/d2renderers/d2svg"
@@ -41,6 +43,7 @@ type Conn struct {
 
 type Layout struct {
 	Scene    Scene   `json:"scene"`
+	Config   Config  `json:"config"`
 	Shapes   []Shape `json:"shapes"`
 	Conns    []Conn  `json:"conns"`
 	LayoutMS float64 `json:"layoutMs"`
@@ -61,6 +64,24 @@ var rulers = sync.Pool{New: func() any {
 }}
 
 type layoutFn func(ctx context.Context, g *d2graph.Graph) error
+
+type layoutPlan func(Config) layoutFn
+
+func engineLayout(seeds []int64) layoutPlan {
+	return func(c Config) layoutFn {
+		switch c.Engine {
+		case engineELK:
+			return d2elklayout.DefaultLayout
+		case engineDagre:
+			return d2dagrelayout.DefaultLayout
+		}
+		return talaLayout(seeds)
+	}
+}
+
+func fixedLayout(fn layoutFn) layoutPlan { return func(Config) layoutFn { return fn } }
+
+func (l *Layout) tala() bool { return l.Config.Engine == engineTala }
 
 const stableHash = "d2squared"
 
@@ -99,21 +120,36 @@ func squareUp(ctx context.Context, g *d2graph.Graph) error {
 	return d2talalayout.RouteEdges(ctx, g, bad)
 }
 
-func layoutWith(ctx context.Context, source string, layout layoutFn) (*Layout, error) {
-	started := time.Now()
+func compileSource(ctx context.Context, source string, cfg Config, layout layoutFn, themeID int64, darkThemeID *int64) (*d2target.Diagram, *d2graph.Graph, *d2svg.RenderOpts, error) {
 	ruler := rulers.Get().(*textmeasure.Ruler)
 	defer rulers.Put(ruler)
 	opts := &d2lib.CompileOptions{
 		Ruler:          ruler,
-		Layout:         go2.Pointer("tala"),
+		Layout:         go2.Pointer(cfg.Engine),
 		LayoutResolver: func(string) (d2graph.LayoutGraph, error) { return d2graph.LayoutGraph(layout), nil },
-		RouterResolver: func(string) (d2graph.RouteEdges, error) { return d2talalayout.RouteEdges, nil },
+		RouterResolver: func(string) (d2graph.RouteEdges, error) {
+			if cfg.Engine == engineTala {
+				return d2talalayout.RouteEdges, nil
+			}
+			return nil, nil
+		},
 	}
-	renderOpts := &d2svg.RenderOpts{Pad: go2.Pointer(int64(pad)), NoXMLTag: go2.Pointer(true), ThemeID: go2.Pointer(int64(0)), DarkThemeID: go2.Pointer(int64(200))}
+	renderOpts := &d2svg.RenderOpts{Pad: go2.Pointer(int64(pad)), ThemeID: go2.Pointer(themeID), DarkThemeID: darkThemeID, Sketch: go2.Pointer(cfg.Sketch)}
 	diagram, g, err := d2lib.Compile(d2log.WithDefault(ctx), source, opts, renderOpts)
+	return diagram, g, renderOpts, err
+}
+
+func layoutWith(ctx context.Context, source string, plan layoutPlan) (*Layout, error) {
+	started := time.Now()
+	cfg, err := readConfig(source)
 	if err != nil {
 		return nil, err
 	}
+	diagram, g, renderOpts, err := compileSource(ctx, source, cfg, plan(cfg), cfg.ThemeID, &cfg.DarkThemeID)
+	if err != nil {
+		return nil, err
+	}
+	renderOpts.NoXMLTag = go2.Pointer(true)
 	svg, err := d2svg.Render(diagram, renderOpts)
 	if err != nil {
 		return nil, err
@@ -125,24 +161,14 @@ func layoutWith(ctx context.Context, source string, layout layoutFn) (*Layout, e
 	svg = bytes.ReplaceAll(svg, []byte(hash), []byte(stableHash))
 	pinned := map[string]bool{}
 	for _, obj := range g.Objects {
-		if obj.Top != nil || obj.Left != nil {
+		if cfg.Engine == engineTala && (obj.Top != nil || obj.Left != nil) {
 			pinned[obj.AbsID()] = true
 		}
 	}
-	l := &Layout{Shapes: []Shape{}, Conns: []Conn{}, graph: g, mu: &sync.Mutex{}}
+	l := &Layout{Shapes: []Shape{}, Conns: []Conn{}, Config: cfg, graph: g, mu: &sync.Mutex{}}
 	for _, sh := range diagram.Shapes {
-		s := Shape{ID: sh.ID, Type: sh.Type, X: sh.Pos.X, Y: sh.Pos.Y, Width: sh.Width, Height: sh.Height,
-			Pinned: pinned[sh.ID], PK: -1}
-		if sh.Type == d2target.ShapeSQLTable {
-			for i, c := range sh.SQLTable.Columns {
-				s.Cols = append(s.Cols, c.Name.Label)
-				for _, k := range c.Constraint {
-					if k == "primary_key" && s.PK < 0 {
-						s.PK = i
-					}
-				}
-			}
-		}
+		s := shapeOf(sh)
+		s.Pinned = pinned[sh.ID]
 		l.Shapes = append(l.Shapes, s)
 	}
 	for _, c := range diagram.Connections {
@@ -162,6 +188,21 @@ func layoutWith(ctx context.Context, source string, layout layoutFn) (*Layout, e
 	l.Scene = splitScene(string(svg), shapeIDs, connIDs)
 	l.LayoutMS = float64(time.Since(started).Microseconds()) / 1000
 	return l, nil
+}
+
+func shapeOf(sh d2target.Shape) Shape {
+	s := Shape{ID: sh.ID, Type: sh.Type, X: sh.Pos.X, Y: sh.Pos.Y, Width: sh.Width, Height: sh.Height, PK: -1}
+	if sh.Type == d2target.ShapeSQLTable {
+		for i, c := range sh.SQLTable.Columns {
+			s.Cols = append(s.Cols, c.Name.Label)
+			for _, k := range c.Constraint {
+				if k == "primary_key" && s.PK < 0 {
+					s.PK = i
+				}
+			}
+		}
+	}
+	return s
 }
 
 func (l *Layout) shape(id string) (Shape, bool) {

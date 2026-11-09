@@ -4,7 +4,8 @@ import { svgEl } from "../svg";
 import type { Candidate, Conn, Edit, Path, PendingChange, Point, Shape, Target, View } from "../types";
 import { createHits, type EndSlot } from "./hits";
 import { mountScene, type Piece } from "./scene";
-import { doneText, pickEnd, pickNode, tipFor, type Zone, type ZoneContext } from "./zones";
+import { describeConfig } from "./config-text";
+import { doneText, pendingFor, pickEnd, pickNode, tipFor, type Zone, type ZoneContext } from "./zones";
 
 const EDGE = 56;
 const MAX_SCROLL = 22;
@@ -145,7 +146,9 @@ export interface Editor {
 }
 
 export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {}): Editor {
-  const enabled = new Set(opts.behaviors ?? ["reparent", "reconnect", "pin", "resize"]);
+  const wanted = opts.behaviors ?? ["reparent", "reconnect", "pin", "resize"];
+  const enabled = new Set(wanted);
+  const talaOnly = ["pin", "resize"];
   root.classList.add("d2-root");
   root.innerHTML = `<div class="d2-stage"><svg class="d2-scene d2squared"><defs></defs><style></style><g class="d2-cam"><g class="l-groups"></g><g class="l-conns"></g><g class="l-shapes"></g><g class="l-drag"></g><g class="l-sel"></g><g class="l-ui"></g></g></svg></div>
     <div class="d2-tip" aria-hidden="true" hidden></div>
@@ -200,6 +203,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     shapes,
     scale,
     enabled,
+    engine: view!.config.engine,
   });
 
   const rect = (): DOMRect => rectCache ?? (rectCache = stage.getBoundingClientRect());
@@ -566,21 +570,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   }
 
   function pendingChange(d: Drag): PendingChange | null {
-    const z = d.zone;
-    if (!z || z.kind === "stay" || z.kind === "none") return null;
-    const title = tipText(d);
-    if (z.kind === "pin") {
-      return {
-        title,
-        lines: [
-          { op: "+", text: `left: ${z.left}` },
-          { op: "+", text: `top: ${z.top}` },
-        ],
-      };
-    }
-    const cand = d.cands.get(z.key);
-    if (!cand) return { title, working: true };
-    return { title, lines: cand.diff, saved: cand.pinLines };
+    return pendingFor(d.target, d.zone, d.zone && "key" in d.zone ? d.cands.get(d.zone.key) : undefined, labelOf);
   }
 
   function renderOverlay(d: Drag): void {
@@ -691,7 +681,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   }
 
   function maybeRoute(d: Drag): void {
-    if (d.routeBusy || !d.moved || d.target.kind !== "node") return;
+    if (d.routeBusy || !d.moved || d.target.kind !== "node" || view!.config.engine !== "tala") return;
     const { dx, dy } = d.cur;
     if (d.lastRoute && Math.hypot(dx - d.lastRoute.dx, dy - d.lastRoute.dy) < 1.5 / scale) return;
     d.routeBusy = true;
@@ -918,7 +908,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       return;
     }
     const z = d.zone;
-    if (cancelled || !z || z.kind === "stay" || z.kind === "none") {
+    if (cancelled || !z || z.kind === "stay" || z.kind === "none" || z.kind === "blocked") {
       d.abort.abort();
       return settleBack(d);
     }
@@ -1174,6 +1164,10 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
     const old = view;
     view = v;
+    for (const name of talaOnly) {
+      if (v.config.engine === "tala" && wanted.includes(name)) enabled.add(name);
+      else enabled.delete(name);
+    }
     shapes = new Map(v.shapes.map((s) => [s.id, s]));
     box = boundsOf(v);
     if (fresh) {
@@ -1229,6 +1223,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   }
 
   const DONE: Partial<Record<Edit["kind"], (e: Edit) => string>> = {
+    config: (e) => describeConfig(e),
     direction: () => "Layout direction changed",
     tidy: (e) => `Tidied up ${labelOf(e.key)}`,
   };

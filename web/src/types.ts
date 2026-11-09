@@ -30,7 +30,7 @@ export interface DiffLine {
 }
 
 export interface Edit {
-  kind: "move" | "reconnect" | "pin" | "unpin" | "direction" | "tidy" | "resize";
+  kind: "move" | "reconnect" | "pin" | "unpin" | "direction" | "tidy" | "resize" | "config";
   key: string;
   to?: string;
   end?: string;
@@ -66,6 +66,15 @@ export interface Scene {
   connections: Piece[];
 }
 
+export type LayoutEngine = "tala" | "elk" | "dagre";
+
+export interface Config {
+  engine: LayoutEngine;
+  sketch: boolean;
+  themeId: number;
+  darkThemeId: number;
+}
+
 export interface View {
   version: number;
   source: string;
@@ -76,6 +85,7 @@ export interface View {
   canRedo: boolean;
   ms: number;
   scene: Scene;
+  config: Config;
   shapes: Shape[];
   conns: Conn[];
   originY: number;

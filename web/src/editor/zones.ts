@@ -1,21 +1,25 @@
 import { contains, depth, editId, parentOf, rectDist, within } from "../geometry";
-import type { Edit, Point, Shape, Target, View } from "../types";
+import type { Candidate, Edit, PendingChange, Point, Shape, Target } from "../types";
+
+export const PLACING_NEEDS_TALA = "Placing boxes needs the TALA layout engine";
 
 export type Zone =
   | { kind: "stay" }
+  | { kind: "blocked" }
   | { kind: "none" }
   | { kind: "pin"; left: number; top: number; edit: Edit }
   | { kind: "move"; to: string; key: string; edit: Edit }
   | { kind: "reconnect"; shape: string; row: number; to: string; key: string; edit: Edit; end: "src" | "dst" };
 
 export interface ZoneContext {
-  view: View;
+  view: { shapes: Shape[] };
   shapes: Map<string, Shape>;
   scale: number;
-  enabled: Set<string>;
+  enabled: ReadonlySet<string>;
+  engine: string;
 }
 
-export const isContainer = (view: View, id: string): boolean => view.shapes.some((s) => parentOf(s.id) === id);
+export const isContainer = (view: { shapes: Shape[] }, id: string): boolean => view.shapes.some((s) => parentOf(s.id) === id);
 
 export function pinZone(me: Shape, cur: { dx: number; dy: number }, id: string): Zone {
   const left = Math.round(me.x + cur.dx);
@@ -36,8 +40,9 @@ export function pickNode(ctx: ZoneContext, d: NodePick): Zone {
   if (!me) return { kind: "stay" };
   const near = Math.hypot(d.cur.dx, d.cur.dy);
   if (!d.moved || near < 18 / ctx.scale) return { kind: "stay" };
-  const pinOr = (): Zone => (ctx.enabled.has("pin") ? pinZone(me, d.cur, d.id) : { kind: "stay" });
-  if (d.alt && ctx.enabled.has("pin")) return pinZone(me, d.cur, d.id);
+  const needsTala = ctx.engine !== "tala";
+  const pinOr = (): Zone => (ctx.enabled.has("pin") ? pinZone(me, d.cur, d.id) : { kind: needsTala ? "blocked" : "stay" });
+  if (d.alt) return pinOr();
   if (!ctx.enabled.has("reparent")) return pinZone(me, d.cur, d.id);
   const margin = 18 / ctx.scale;
   let best: Shape | null = null;
@@ -107,6 +112,7 @@ export type Namer = (id: string) => string;
 
 export function tipFor(target: Target, zone: Zone, name: Namer): string {
   if (zone.kind === "none") return target.kind === "edgeEnd" ? "Drop on a box to connect" : "";
+  if (zone.kind === "blocked") return PLACING_NEEDS_TALA;
   if (zone.kind === "pin") return "Place here";
   if (zone.kind === "move") return zone.to ? `Move into ${name(zone.to)}` : "Move to the top level";
   if (zone.kind === "reconnect") {
@@ -122,4 +128,21 @@ export function doneText(target: Target, zone: Zone, name: Namer): string {
   if (zone.kind === "pin") return `Placed ${who}`;
   if (zone.kind === "reconnect") return `Arrow now ${zone.end === "dst" ? "points at" : "starts from"} ${name(zone.shape)}`;
   return "";
+}
+
+export function pendingFor(target: Target, zone: Zone | null, cand: Candidate | undefined, name: Namer): PendingChange | null {
+  if (!zone || zone.kind === "stay" || zone.kind === "none") return null;
+  const title = tipFor(target, zone, name);
+  if (zone.kind === "blocked") return { title };
+  if (zone.kind === "pin") {
+    return {
+      title,
+      lines: [
+        { op: "+", text: `left: ${zone.left}` },
+        { op: "+", text: `top: ${zone.top}` },
+      ],
+    };
+  }
+  if (!cand) return { title, working: true };
+  return { title, lines: cand.diff, saved: cand.pinLines };
 }
