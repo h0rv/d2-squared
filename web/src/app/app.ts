@@ -1,4 +1,5 @@
 import type { Engine } from "../engine/engine";
+import { parentOf } from "../geometry";
 import { HttpEngine, probeServe } from "../engine/http-engine";
 import { mount, type Editor } from "../editor/editor";
 import { mountCode, type CodePanel } from "../ui/code";
@@ -100,7 +101,14 @@ function wireCanvas(editor: Editor, chrome: Chrome): void {
   });
   editor.on("select", (id) => {
     $("dir-label").textContent = id ? `Direction inside ${editor.label(id)}` : "Layout direction";
+    const group = id !== "" && !!editor.view?.shapes.some((s) => parentOf(s.id) === id);
+    $("tidy").hidden = !group;
+    $("tidy").textContent = group ? `Tidy up ${editor.label(id)}` : "Tidy up";
   });
+  $("tidy").onclick = () => {
+    closeMenu();
+    void editor.send({ kind: "tidy", key: editor.selected });
+  };
   undo.onclick = () => void editor.undo();
   redo.onclick = () => void editor.redo();
   $("fit").onclick = () => editor.fit(true);

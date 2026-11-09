@@ -958,6 +958,50 @@ body[data-ready] #editor {
   vector-effect: non-scaling-stroke;
 }
 
+.l-sel .handle {
+  fill: var(--paper);
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.d2-scene.dragging .l-sel .handle {
+  display: none;
+}
+
+.l-ui .resize-box {
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+
+.d2-stage.resizing {
+  cursor: nwse-resize;
+}
+
+.d2-action {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 15;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--ink);
+  font: 600 12.5px/1.3 var(--sans);
+  cursor: pointer;
+  will-change: transform;
+}
+
+.d2-action:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.d2-action[hidden] {
+  display: none;
+}
+
 .l-ui .target {
   fill: color-mix(in srgb, var(--accent) 12%, transparent);
   stroke: var(--accent);

@@ -1,5 +1,5 @@
 import type { Engine } from "../engine/engine";
-import { midpoint, nameOf, pathD, within } from "../geometry";
+import { midpoint, nameOf, parentOf, pathD, within } from "../geometry";
 import { svgEl } from "../svg";
 import type { Candidate, Conn, Edit, Path, PendingChange, Point, Shape, Target, View } from "../types";
 import { createHits, type EndSlot } from "./hits";
@@ -15,6 +15,10 @@ const LIFT = 0.03;
 const LIFT_MS = 140;
 const KEEP_PX = 96;
 const PAD = 40;
+const HANDLE_PX = 8;
+const HANDLE_HIT_PX = 12;
+const HANDLE_HIT_TOUCH_PX = 22;
+const MIN_BOX = { w: 48, h: 32 };
 
 export interface Insets {
   top: number;
@@ -50,6 +54,24 @@ interface Gesture {
   ty: number;
   scale: number;
   dist: number;
+}
+
+type Corner = "nw" | "ne" | "sw" | "se";
+
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface Resizing {
+  id: string;
+  corner: Corner;
+  from: Rect;
+  rect: Rect;
+  min: { w: number; h: number };
+  pointer: string;
 }
 
 interface Drag {
@@ -123,10 +145,11 @@ export interface Editor {
 }
 
 export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {}): Editor {
-  const enabled = new Set(opts.behaviors ?? ["reparent", "reconnect", "pin"]);
+  const enabled = new Set(opts.behaviors ?? ["reparent", "reconnect", "pin", "resize"]);
   root.classList.add("d2-root");
   root.innerHTML = `<div class="d2-stage"><svg class="d2-scene d2squared"><defs></defs><style></style><g class="d2-cam"><g class="l-groups"></g><g class="l-conns"></g><g class="l-shapes"></g><g class="l-drag"></g><g class="l-sel"></g><g class="l-ui"></g></g></svg></div>
-    <div class="d2-tip" aria-hidden="true" hidden></div>`;
+    <div class="d2-tip" aria-hidden="true" hidden></div>
+    <button class="surface d2-action" hidden>Tidy up</button>`;
   const q = <T extends Element>(sel: string): T => root.querySelector(sel) as T;
   const stage = q<HTMLElement>(".d2-stage");
   const scene = q<SVGSVGElement>(".d2-scene");
@@ -135,6 +158,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   const selLayer = q<SVGGElement>(".l-sel");
   const over = q<SVGGElement>(".l-ui");
   const tip = q<HTMLElement>(".d2-tip");
+  const action = q<HTMLButtonElement>(".d2-action");
 
   let view: View | null = null;
   let box = { x: 0, y: 0, w: 1, h: 1 };
@@ -145,6 +169,8 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   let insets: Insets = { top: 64, right: 24, bottom: 64, left: 24 };
   let selected = "";
   let drag: Drag | null = null;
+  let resizing: Resizing | null = null;
+  let drawnScale = 0;
   let gesture: Gesture | null = null;
   let spaceDown = false;
   let armed = "";
@@ -214,6 +240,8 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     stage.style.setProperty("--grid", `${grid}px`);
     stage.style.setProperty("--grid-x", `${tx}px`);
     stage.style.setProperty("--grid-y", `${ty}px`);
+    if (scale !== drawnScale) drawSelection();
+    placeAction();
   }
 
   function keepVisible(): void {
@@ -371,17 +399,139 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
   }
 
+  const corners = (s: Shape): [Corner, number, number][] => [
+    ["nw", s.x, s.y],
+    ["ne", s.x + s.width, s.y],
+    ["sw", s.x, s.y + s.height],
+    ["se", s.x + s.width, s.y + s.height],
+  ];
+
+  const resizable = (id: string): Shape | undefined => {
+    const s = shapes.get(id);
+    return s && enabled.has("resize") && s.type !== "sql_table" ? s : undefined;
+  };
+
   function drawSelection(): void {
     selLayer.replaceChildren();
+    drawnScale = scale;
     const s = selected ? shapes.get(selected) : undefined;
     if (!s) return;
     svgEl("rect", { x: s.x - 3, y: s.y - 3, width: s.width + 6, height: s.height + 6, rx: 8, class: "sel-box" }, selLayer);
+    if (!resizable(s.id)) return;
+    const px = 1 / scale;
+    for (const [corner, x, y] of corners(s)) {
+      svgEl(
+        "rect",
+        {
+          x: x - (HANDLE_PX / 2) * px,
+          y: y - (HANDLE_PX / 2) * px,
+          width: HANDLE_PX * px,
+          height: HANDLE_PX * px,
+          rx: 2 * px,
+          class: "handle " + corner,
+        },
+        selLayer,
+      );
+    }
+  }
+
+  function placeAction(): void {
+    const s = selected && !drag && !resizing ? shapes.get(selected) : undefined;
+    if (!s || !view || !view.shapes.some((c) => parentOf(c.id) === s.id)) {
+      action.hidden = true;
+      return;
+    }
+    action.hidden = false;
+    const top = toScreen({ x: s.x, y: s.y });
+    const right = toScreen({ x: s.x + s.width, y: s.y });
+    const r = stage.getBoundingClientRect();
+    const x = clamp(right.x - action.offsetWidth, r.left + 8, r.right - action.offsetWidth - 8);
+    const y = Math.max(top.y - action.offsetHeight - 10, r.top + 8);
+    action.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
+  function hitHandle(p: Point, touch = false): Corner | null {
+    const s = resizable(selected);
+    if (!s || !enabled.has("resize")) return null;
+    const reach = (touch ? HANDLE_HIT_TOUCH_PX : HANDLE_HIT_PX) / scale;
+    for (const [corner, x, y] of corners(s)) if (Math.hypot(p.x - x, p.y - y) <= reach) return corner;
+    return null;
+  }
+
+  function minSize(id: string): { w: number; h: number } {
+    const text = pieces.get(id)?.el.querySelector("text")?.getBBox();
+    return text ? { w: Math.max(MIN_BOX.w, Math.ceil(text.width) + 24), h: Math.max(MIN_BOX.h, Math.ceil(text.height) + 16) } : MIN_BOX;
+  }
+
+  function beginResize(ev: PointerEvent, corner: Corner): void {
+    const s = shapes.get(selected)!;
+    const from = { x: s.x, y: s.y, w: s.width, h: s.height };
+    resizing = { id: s.id, corner, from, rect: from, min: minSize(s.id), pointer: ev.pointerType };
+    stage.setPointerCapture(ev.pointerId);
+    stage.classList.add("resizing");
+    hover = null;
+    over.replaceChildren();
+    placeAction();
+  }
+
+  function moveResize(ev: PointerEvent): void {
+    const r = resizing!;
+    const p = toDiagram(ev);
+    const { from, min } = r;
+    const west = r.corner.includes("w");
+    const north = r.corner.startsWith("n");
+    const x1 = from.x + from.w;
+    const y1 = from.y + from.h;
+    const x = west ? Math.min(Math.round(p.x), x1 - min.w) : from.x;
+    const y = north ? Math.min(Math.round(p.y), y1 - min.h) : from.y;
+    const w = west ? x1 - x : Math.max(Math.round(p.x) - from.x, min.w);
+    const h = north ? y1 - y : Math.max(Math.round(p.y) - from.y, min.h);
+    r.rect = { x, y, w, h };
+    over.replaceChildren();
+    svgEl("rect", { x, y, width: w, height: h, rx: 6, class: "resize-box" }, over);
+    showTip(`${w} × ${h}`, ev, isTouch(r.pointer));
+  }
+
+  async function finishResize(cancelled: boolean): Promise<void> {
+    const r = resizing;
+    if (!r) return;
+    resizing = null;
+    stage.classList.remove("resizing");
+    tip.hidden = true;
+    over.replaceChildren();
+    const { rect: n, from } = r;
+    if (cancelled || (n.x === from.x && n.y === from.y && n.w === from.w && n.h === from.h) || !view) {
+      placeAction();
+      return;
+    }
+    busy = true;
+    const edit: Edit = { kind: "resize", key: r.id, left: n.x, top: n.y, width: n.w, height: n.h };
+    const name = labelOf(r.id);
+    try {
+      const v = await engine.commit(edit, view.version);
+      applyView(v);
+      opts.onEdit?.(edit, v.source);
+      setStatus(`Resized ${name}`, "done");
+    } catch (err) {
+      setStatus(String((err as Error).message ?? err), "err");
+      if ((err as { status?: number }).status === 409) await refresh();
+    } finally {
+      busy = false;
+      flushExternal();
+    }
   }
 
   function onHover(ev: PointerEvent): void {
     if (drag || busy || !view || gesture) return;
     const touch = isTouch(ev.pointerType);
     const p = toDiagram(ev);
+    const corner = hitHandle(p, touch);
+    if (corner) {
+      hover = `h${corner}`;
+      over.replaceChildren();
+      stage.style.cursor = corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize";
+      return;
+    }
     const end = hitEnd(p, touch);
     const conn = end ? end.conn : nearConn(p, touch);
     const shape = conn ? null : hitShape(p);
@@ -693,6 +843,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     scene.classList.add("dragging");
     stage.classList.add("dragging");
     hover = null;
+    placeAction();
     d.liftAt = performance.now();
     schedule(d);
   }
@@ -937,7 +1088,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
         return;
       }
     }
-    if (busy || drag || !view) return;
+    if (busy || drag || resizing || !view) return;
     if (ev.button !== 0 && ev.button !== 1) return;
     ev.preventDefault();
     if (ev.button === 1 || spaceDown) {
@@ -946,6 +1097,8 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
     const touch = isTouch(ev.pointerType);
     const p = toDiagram(ev);
+    const corner = hitHandle(p, touch);
+    if (corner) return beginResize(ev, corner);
     const end = hitEnd(p, touch);
     if (end) return beginDrag(ev, { kind: "edgeEnd", edge: end.conn.id, end: end.end });
     const s = hitShape(p);
@@ -961,6 +1114,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   function onMove(ev: PointerEvent): void {
     if (touches.has(ev.pointerId)) touches.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
     if (gesture) return moveGesture(ev);
+    if (resizing) return moveResize(ev);
     if (!drag) return onHover(ev);
     const d = drag;
     d.client = { clientX: ev.clientX, clientY: ev.clientY };
@@ -984,7 +1138,8 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       if (touches.size === 0 || gesture.kind === "pan") endGesture();
       return;
     }
-    if (drag) void finish(drag, ev.type === "pointercancel");
+    if (resizing) void finishResize(ev.type === "pointercancel");
+    else if (drag) void finish(drag, ev.type === "pointercancel");
   }
 
   function wheel(ev: WheelEvent): void {
@@ -1001,6 +1156,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   function select(id: string): void {
     selected = id;
     drawSelection();
+    placeAction();
     emit("select", id);
   }
 
@@ -1038,6 +1194,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     over.replaceChildren();
     if (selected && !shapes.has(selected)) selected = "";
     drawSelection();
+    placeAction();
     emit("error", null);
     emit("view", v, prev);
     if (prev && fitted && v.cause !== "open") window.setTimeout(() => fitted && !drag && !busy && fit(true), 320);
@@ -1071,14 +1228,20 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
   }
 
+  const DONE: Partial<Record<Edit["kind"], (e: Edit) => string>> = {
+    direction: () => "Layout direction changed",
+    tidy: (e) => `Tidied up ${labelOf(e.key)}`,
+  };
+
   async function send(edit: Edit): Promise<void> {
-    if (busy || drag || !view) return;
+    if (busy || drag || resizing || !view) return;
     busy = true;
     setStatus("Laying out…", "busy");
     try {
+      const done = DONE[edit.kind]?.(edit) ?? "Layout reset";
       const v = await engine.commit(edit, view.version);
       applyView(v);
-      setStatus(edit.kind === "direction" ? "Layout direction changed" : "Layout reset", "done");
+      setStatus(done, "done");
     } catch (err) {
       setStatus(String((err as Error).message ?? err), "err");
     } finally {
@@ -1095,6 +1258,9 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
   });
 
+  action.addEventListener("click", () => {
+    if (selected) void send({ kind: "tidy", key: selected });
+  });
   stage.addEventListener("pointerdown", onDown);
   stage.addEventListener("pointermove", onMove);
   stage.addEventListener("pointerup", onUp);
@@ -1125,6 +1291,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
     if (e.altKey) return;
     if (key === "f") fit(true);
+    else if (key === "escape" && resizing) void finishResize(true);
     else if (key === "escape" && !drag && selected) select("");
     else if (key === " " && !spaceDown && (e.target === document.body || stage.contains(e.target as Node))) {
       spaceDown = true;

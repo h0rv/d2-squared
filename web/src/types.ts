@@ -30,12 +30,14 @@ export interface DiffLine {
 }
 
 export interface Edit {
-  kind: "move" | "reconnect" | "pin" | "unpin" | "direction";
+  kind: "move" | "reconnect" | "pin" | "unpin" | "direction" | "tidy" | "resize";
   key: string;
   to?: string;
   end?: string;
   left?: number;
   top?: number;
+  width?: number;
+  height?: number;
 }
 
 export type Target = { kind: "node"; id: string } | { kind: "edgeEnd"; edge: string; end: "src" | "dst" };

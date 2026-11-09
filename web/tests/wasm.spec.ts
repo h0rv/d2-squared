@@ -310,3 +310,84 @@ test("wasm: dragging far right and down keeps the whole diagram visible after th
   expect(box.bottom).toBeLessThanOrEqual(box.h);
   await page.screenshot({ path: "test-results/ux-v2/light-desktop-drop-far.png" });
 });
+
+async function corner(page: Page, id: string, which: "se" | "nw") {
+  return page.evaluate(
+    ([i, w]) => {
+      const e = window.editor!;
+      const s = e.shape(i!)!;
+      return w === "se" ? e.screenPoint(s.x + s.width, s.y + s.height) : e.screenPoint(s.x, s.y);
+    },
+    [id, which] as const,
+  );
+}
+
+test("wasm: resize a box and a group by their corner handles", async ({ page }) => {
+  const { diagram } = await open(page, "architecture");
+  await page.evaluate(() => window.editor!.fit());
+  await sleep(400);
+  const before = await diagram.source();
+  const c = await diagram.center("gateway");
+  await page.mouse.click(c.x, c.y);
+  await expect(page.locator(".l-sel .handle")).toHaveCount(4);
+  await page.screenshot({ path: "test-results/ux-v2/light-desktop-handles.png" });
+  const start = await diagram.mustShape("gateway");
+  const scale = await page.evaluate(() => window.editor!.scale);
+  const se = await corner(page, "gateway", "se");
+  await diagram.drag(se, { x: se.x + 60, y: se.y + 36 }, { hold: false });
+  const grown = await diagram.mustShape("gateway");
+  expect(Math.abs(grown.width - (start.width + 60 / scale))).toBeLessThan(3);
+  expect(Math.abs(grown.height - (start.height + 36 / scale))).toBeLessThan(3);
+  expect(grown.x).toBe(start.x);
+  expect(await diagram.source()).toMatch(new RegExp(`width: ${grown.width}\\b`));
+  await expect(page.locator("#toast")).toContainText("Resized API gateway");
+  await expect(page.locator("#toast")).toContainText("Undo");
+  await page.locator("#toast .toast-action").click();
+  await diagram.idle();
+  await sleep(500);
+  expect(await diagram.source()).toBe(before);
+
+  const group = await diagram.mustShape("services");
+  const inside = await diagram.at(group.x + 12, group.y + 12);
+  await page.mouse.click(inside.x, inside.y);
+  await expect(page.locator(".d2-action")).toBeVisible();
+  const gse = await corner(page, "services", "se");
+  await diagram.drag(gse, { x: gse.x + 70, y: gse.y + 50 }, { hold: false });
+  const wide = await diagram.mustShape("services");
+  expect(wide.width).toBeGreaterThan(group.width + 60 / scale - 4);
+  expect(await diagram.source()).toMatch(/services: Services \{[\s\S]*?width: \d+/);
+  await page.screenshot({ path: "test-results/ux-v2/light-desktop-resized.png" });
+});
+
+test("wasm: tidy up a group drops its saved positions and keeps the rest", async ({ page }) => {
+  const { diagram } = await open(page, "architecture");
+  await page.evaluate(() => window.editor!.fit());
+  await sleep(400);
+  const notifier = await diagram.mustShape("services.notifier");
+  const group = await diagram.mustShape("services");
+  const from = await diagram.center("services.notifier");
+  const to = await diagram.at(group.x + group.width / 2, group.y + 40);
+  await diagram.drag(from, to, { hold: false });
+  expect((await diagram.mustShape("services.notifier")).x).not.toBe(notifier.x);
+  const pinnedFile = await diagram.source();
+  expect(pinnedFile).toMatch(/notifier: Notifier \{[^}]*left:/);
+  const gateway = await diagram.mustShape("gateway");
+  const inside = await diagram.at(group.x + 14, group.y + 14);
+  await page.mouse.click(inside.x, inside.y);
+  const tidy = page.locator(".d2-action");
+  await expect(tidy).toBeVisible();
+  await expect(tidy).toHaveText("Tidy up");
+  await page.screenshot({ path: "test-results/ux-v2/light-desktop-tidy-action.png" });
+  await tidy.click();
+  await expect(page.locator("#toast")).toContainText("Tidied up Services");
+  await diagram.idle();
+  await sleep(700);
+  const tidied = await diagram.source();
+  expect(tidied).not.toMatch(/notifier: Notifier \{[^}]*left:/);
+  expect(tidied).toMatch(/gateway: API gateway \{[^}]*left:/);
+  const after = await diagram.mustShape("gateway");
+  expect([after.x, after.y]).toEqual([gateway.x, gateway.y]);
+  await page.click("#more");
+  await page.keyboard.press("Escape");
+  await page.screenshot({ path: "test-results/ux-v2/light-desktop-tidied.png" });
+});
