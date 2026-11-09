@@ -3,7 +3,7 @@ import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync } fr
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test as base } from "@playwright/test";
-import { Diagram, frameStats, sleep } from "./helpers";
+import { Diagram, expectClean, frameStats, sleep } from "./helpers";
 
 const engineDir = path.resolve(import.meta.dirname, "../../engine");
 const binary = path.resolve(import.meta.dirname, "../.build/d2squared");
@@ -41,6 +41,8 @@ const test = base.extend<{ serve: (fixture: string) => Promise<Served> }>({
   },
 });
 
+test.afterEach(expectClean);
+
 test.beforeAll(() => {
   mkdirSync(path.dirname(binary), { recursive: true });
   execFileSync("go", ["build", "-o", binary, "./cmd/d2squared"], { cwd: engineDir, stdio: "inherit" });
@@ -62,21 +64,19 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
 
   await d.openCode();
   const data = await d.mustShape("data");
-  let live: { paths: string[]; labels: (string | null)[]; originalHidden: boolean } | null = null;
+  let live: { paths: string[]; labels: (string | null)[]; copies: number } | null = null;
   let r = await d.drag(await d.center("services.billing"), await d.at(data.x + 40, data.y + 80), {
     afterZones: async () => {
       live = await page.evaluate(() => ({
-        paths: [...document.querySelectorAll(".d2-float path.connection")].map((p) => p.getAttribute("d") ?? ""),
-        labels: [...document.querySelectorAll(".d2-float .edge-label text")].map((n) => n.textContent),
-        originalHidden: [...document.querySelectorAll(".d2-canvas > .d2-svg text")].every(
-          (n) => !n.textContent?.includes("events") || !!n.closest("[display=none]"),
-        ),
+        paths: [...document.querySelectorAll(".l-drag path.connection")].map((p) => p.getAttribute("d") ?? ""),
+        labels: [...document.querySelectorAll(".l-drag .label text")].map((n) => n.textContent),
+        copies: [...document.querySelectorAll(".d2-cam text")].filter((n) => n.textContent === "events").length,
       }));
     },
   });
   expect(live!.paths.some((p) => / S /.test(p))).toBe(true);
   expect(live!.labels).toContain("events");
-  expect(live!.originalHidden).toBe(true);
+  expect(live!.copies).toBe(1);
   expect(r.dashed).toBe(0);
   expect(r.status).toMatch(/^Move into data$/i);
   expect(r.diff).toMatch(/\+/);
@@ -104,7 +104,7 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
   await d.drag(auth, { x: auth.x + 300, y: auth.y + 200 }, { release: false, hold: false });
   await d.cancelDrag();
   expect(served.source()).toBe(before);
-  expect(await page.evaluate(() => document.querySelectorAll(".d2-svg g[transform]").length)).toBe(0);
+  expect(await page.evaluate(() => document.querySelectorAll(".d2-cam [data-id][transform]").length)).toBe(0);
 
   await page.keyboard.press("Control+z");
   await sleep(600);
@@ -133,7 +133,7 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
   expect(Math.abs(pg2.x - pg.x - 40)).toBeLessThan(6);
   expect(Math.abs(pg2.y - pg.y - 30)).toBeLessThan(6);
   await page.screenshot({ path: "test-results/serve-architecture.png" });
-  d.noErrors();
+  await d.noErrors();
 });
 
 test("serve: large ERD pin, column reconnect, early drop and autoscroll", async ({ page, serve }) => {
@@ -179,18 +179,17 @@ test("serve: large ERD pin, column reconnect, early drop and autoscroll", async 
   await sleep(300);
   const team = await d.center("products");
   const stageRect = await page.evaluate(() => ({ right: window.innerWidth, bottom: window.innerHeight }));
-  const canvasAt = () =>
-    page.evaluate(() => {
-      const box = document.querySelector(".d2-canvas")!.getBoundingClientRect();
-      return [box.left, box.top] as const;
-    });
+  const canvasAt = async () => {
+    const p = await d.at(0, 0);
+    return [p.x, p.y] as const;
+  };
   const startScroll = await canvasAt();
   await d.drag(team, { x: stageRect.right - 12, y: stageRect.bottom - 12 }, { release: false, hold: false });
   await sleep(700);
   const scrolled = await canvasAt();
   await d.cancelDrag();
   expect(startScroll[0] - scrolled[0] > 50 || startScroll[1] - scrolled[1] > 50).toBe(true);
-  d.noErrors();
+  await d.noErrors();
 });
 
 for (const scheme of ["dark", "light"] as const) {
@@ -212,7 +211,7 @@ for (const scheme of ["dark", "light"] as const) {
       expect(state).toMatchObject({ sameOrder: true, hidden: 0, leftovers: 0 });
     }
     await page.screenshot({ path: `test-results/serve-${scheme}.png` });
-    d.noErrors();
+    await d.noErrors();
     await context.close();
   });
 }

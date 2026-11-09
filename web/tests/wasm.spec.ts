@@ -1,8 +1,10 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
-import { Diagram, sleep } from "./helpers";
+import { Diagram, expectClean, sleep } from "./helpers";
 
 const PAGE = "/d2-squared/";
+
+test.afterEach(expectClean);
 
 const timings: Record<string, Record<string, number | null>> = {};
 
@@ -19,7 +21,7 @@ async function open(page: Page, example: string, query = ""): Promise<{ diagram:
   if (example !== "architecture") {
     await page.click(`[data-example="${example}"]`);
     await page.waitForFunction((id) => document.querySelector(`[data-example="${id}"]`)?.getAttribute("aria-checked") === "true", example);
-    await page.waitForFunction(() => !!window.editor?.view?.svg);
+    await page.waitForFunction(() => !!window.editor?.view?.scene);
     await sleep(800);
   }
   const loadMs = Date.now() - started;
@@ -99,7 +101,7 @@ for (const sig of signatures) {
       dropToViewMs: stats?.dropToViewMs ?? null,
     };
     await page.screenshot({ path: `test-results/wasm-${sig.example}.png` });
-    diagram.noErrors();
+    await diagram.noErrors();
   });
 }
 
@@ -119,8 +121,8 @@ test("wasm: dark mode keeps fills and undo restores the file", async ({ browser 
   await context.close();
 });
 
-test("wasm: editing the source and sharing a link", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+test("wasm: editing the source and sharing a link", async ({ page, context, browserName }) => {
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await open(page, "architecture");
   await page.click("#code-toggle");
   await page.fill("#code-input", "a: Alpha\nb: Beta\na -> b\n");
@@ -172,7 +174,7 @@ for (const size of [
     await sleep(500);
     const inside = async (height = size.height) => {
       const box = await page.evaluate(() => {
-        const r = document.querySelector(".d2-svg > svg")!.getBoundingClientRect();
+        const r = document.querySelector(".d2-cam")!.getBoundingClientRect();
         return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
       });
       expect(box.left).toBeGreaterThanOrEqual(0);
@@ -213,4 +215,98 @@ test("wasm: a toast follows a drop and nothing dashed shows during the drag", as
   await expect(page.locator("#code-lines .ln.hl").first()).toBeAttached();
   await expect(page.locator("#code-lines .ln.pos").first()).toBeVisible();
   await expect(page.locator("#toast")).toBeHidden({ timeout: 8000 });
+});
+
+const sample = (page: Page, shot: Buffer, x: number, y: number) =>
+  page.evaluate(
+    async ([b64, px, py]) => {
+      const img = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+      const canvas = new OffscreenCanvas(img.width, img.height);
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const [r = 0, g = 0, b = 0] = ctx.getImageData(Number(px), Number(py), 1, 1).data;
+      return [r, g, b];
+    },
+    [shot.toString("base64"), x, y] as const,
+  );
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`wasm: a box dragged past the diagram edge is never clipped (${scheme})`, async ({ browser }) => {
+    const context = await browser.newContext({ colorScheme: scheme, viewport: { width: 1500, height: 950 } });
+    const page = await context.newPage();
+    const { diagram } = await open(page, "architecture");
+    await page.evaluate(() => window.editor!.fit());
+    await sleep(400);
+    const left = await page.evaluate(() => {
+      const e = window.editor!;
+      return Math.min(...e.view!.shapes.map((s) => e.screenPoint(s.x, s.y).x));
+    });
+    const from = await diagram.center("clients.web");
+    const to = { x: Math.max(left - 150, 60), y: Math.max(from.y - 200, 120) };
+    expect(to.x).toBeLessThan(left - 40);
+    await diagram.drag(from, to, { release: false, hold: false, steps: 30 });
+    await sleep(400);
+    const info = await page.evaluate(() => {
+      const piece = document.querySelector<SVGGElement>('.l-drag [data-id="clients.web"]')!;
+      const r = piece.getBoundingClientRect();
+      const shape = piece.querySelector(".shape rect")!;
+      const sr = shape.getBoundingClientRect();
+      const arrows = [...document.querySelectorAll(".l-drag path.connection")].map((p) => {
+        const b = p.getBoundingClientRect();
+        return { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+      });
+      const clips: string[] = [];
+      for (let n: Element | null = piece; n && n !== document.documentElement; n = n.parentElement) {
+        const css = getComputedStyle(n);
+        if (n.classList.contains("d2-stage") || n.classList.contains("d2-scene")) continue;
+        if (css.clipPath !== "none" || /paint|strict|content/.test(css.contain) || (n.tagName !== "BODY" && css.overflow === "hidden"))
+          clips.push(n.tagName + "." + n.getAttribute("class"));
+      }
+      return {
+        box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+        shape: { x: sr.left + 8, y: sr.top + 8 },
+        fill: getComputedStyle(shape).fill,
+        arrows,
+        clips,
+        view: { w: innerWidth, h: innerHeight },
+      };
+    });
+    expect(info.clips).toEqual([]);
+    expect(info.box.left).toBeGreaterThanOrEqual(0);
+    expect(info.box.top).toBeGreaterThanOrEqual(0);
+    expect(info.box.right).toBeLessThanOrEqual(info.view.w);
+    expect(info.box.bottom).toBeLessThanOrEqual(info.view.h);
+    expect(info.box.left).toBeLessThan(left);
+    expect(info.arrows.length).toBeGreaterThan(0);
+    for (const a of info.arrows) {
+      expect(a.right - a.left + (a.bottom - a.top)).toBeGreaterThan(20);
+      expect(a.left).toBeGreaterThanOrEqual(0);
+      expect(a.top).toBeGreaterThanOrEqual(0);
+    }
+    const [r = 0, g = 0, b = 0] = await sample(page, await page.screenshot(), info.shape.x, info.shape.y);
+    const want = info.fill.match(/\d+/g)!.map(Number);
+    expect(Math.abs(r - want[0]!) + Math.abs(g - want[1]!) + Math.abs(b - want[2]!)).toBeLessThan(24);
+    await page.screenshot({ path: `test-results/ux-v2/${scheme}-desktop-drag-past-edge.png` });
+    await diagram.cancelDrag();
+    await context.close();
+  });
+}
+
+test("wasm: dragging far right and down keeps the whole diagram visible after the refit", async ({ page }) => {
+  const { diagram } = await open(page, "architecture");
+  await page.evaluate(() => window.editor!.fit());
+  await sleep(400);
+  const from = await diagram.center("gateway");
+  await diagram.drag(from, { x: 1380, y: 800 }, { hold: false, steps: 30 });
+  await sleep(1200);
+  expect(await page.evaluate(() => window.editor!.fitted)).toBe(true);
+  const box = await page.evaluate(() => {
+    const r = document.querySelector(".d2-cam")!.getBoundingClientRect();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, w: innerWidth, h: innerHeight };
+  });
+  expect(box.left).toBeGreaterThanOrEqual(0);
+  expect(box.top).toBeGreaterThanOrEqual(0);
+  expect(box.right).toBeLessThanOrEqual(box.w);
+  expect(box.bottom).toBeLessThanOrEqual(box.h);
+  await page.screenshot({ path: "test-results/ux-v2/light-desktop-drop-far.png" });
 });

@@ -13,7 +13,7 @@ const channel = process.env.PW_CHANNEL;
 const browser = await chromium.launch({ headless: true, ...(channel ? { channel } : {}) });
 const page = await browser.newPage({ viewport: { width: 1440, height: 860 }, colorScheme: scheme, deviceScaleFactor: 2 });
 await page.goto(url);
-await page.waitForFunction(() => !!window.editor?.view?.svg && !!document.body.dataset.ready, null, { timeout: 60000 });
+await page.waitForFunction(() => !!window.editor?.view?.scene && !!document.body.dataset.ready, null, { timeout: 60000 });
 if (example !== "architecture") {
   await page.click(`[data-example="${example}"]`);
   await page.waitForTimeout(1500);

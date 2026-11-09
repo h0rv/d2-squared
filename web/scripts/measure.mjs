@@ -11,7 +11,7 @@ async function run(label, prepare, drag) {
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
   const started = Date.now();
   await page.goto(url);
-  await page.waitForFunction(() => !!window.editor?.view?.svg && !document.getElementById("loading")?.offsetParent, null, {
+  await page.waitForFunction(() => !!window.editor?.view?.scene && !document.getElementById("loading")?.offsetParent, null, {
     timeout: 120000,
   });
   const firstLoad = Date.now() - started;

@@ -3,8 +3,6 @@ import type { Edit, Point, Shape } from "./types";
 export const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-export const cls = (id: string): string => btoa(String.fromCharCode(...new TextEncoder().encode(esc(id))));
-
 export const parentOf = (id: string): string => (id.includes(".") ? id.slice(0, id.lastIndexOf(".")) : "");
 
 export const within = (id: string, root: string): boolean => root !== "" && (id === root || id.startsWith(root + "."));

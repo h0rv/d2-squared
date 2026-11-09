@@ -52,19 +52,30 @@ export interface Candidate {
   cached: boolean;
 }
 
+export interface Piece {
+  id: string;
+  svg: string;
+}
+
+export interface Scene {
+  css: string;
+  defs: string;
+  shapes: Piece[];
+  connections: Piece[];
+}
+
 export interface View {
   version: number;
   source: string;
   error?: string;
   cause: "open" | "reload" | "commit" | "undo" | "redo" | "error";
-  changed: number[] | null;
+  changed: number[];
   canUndo: boolean;
   canRedo: boolean;
   ms: number;
-  svg: string;
+  scene: Scene;
   shapes: Shape[];
   conns: Conn[];
-  originX: number;
   originY: number;
   layoutMs: number;
 }
@@ -72,7 +83,7 @@ export interface View {
 export type PreviewMessage = { candidate: Candidate } | { done: true; count: number; ms: number };
 
 export interface RouteResult {
-  paths: Path[] | null;
+  paths: Path[];
 }
 
 export interface PendingChange {

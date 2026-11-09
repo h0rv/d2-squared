@@ -20,23 +20,45 @@ export interface DragResult {
   stats: DragStats | null;
 }
 
+const watchToasts = () => {
+  if ((window as unknown as { toastErrors?: string[] }).toastErrors) return;
+  const seen: string[] = [];
+  (window as unknown as { toastErrors: string[] }).toastErrors = seen;
+  const toast = document.getElementById("toast");
+  if (!toast) return;
+  new MutationObserver(() => {
+    if (toast.classList.contains("error") && toast.textContent) seen.push(toast.textContent);
+  }).observe(toast, { attributes: true, childList: true, subtree: true, characterData: true });
+};
+
+const watched: Diagram[] = [];
+
+export async function expectClean(): Promise<void> {
+  const all = watched.splice(0);
+  for (const d of all) await d.noErrors();
+}
+
 export class Diagram {
   readonly errors: string[] = [];
 
   constructor(readonly page: Page) {
+    watched.push(this);
     page.on("pageerror", (e) => this.errors.push(e.message));
     page.on("console", (m) => {
       if (m.type() === "error") this.errors.push(m.text());
     });
+    void page.addInitScript(`document.addEventListener("DOMContentLoaded", ${watchToasts.toString()})`);
+    void page.evaluate(watchToasts).catch(() => {});
   }
 
-  noErrors(): void {
-    expect(this.errors).toEqual([]);
+  async noErrors(): Promise<void> {
+    const toasts = await this.page.evaluate(() => (window as unknown as { toastErrors?: string[] }).toastErrors ?? []).catch(() => []);
+    expect([...this.errors, ...toasts]).toEqual([]);
   }
 
   ready(timeout = 60_000): Promise<unknown> {
     return this.page.waitForFunction(
-      () => !!window.editor?.view?.svg && !!document.body.dataset["ready"] && !document.getElementById("loading")?.offsetParent,
+      () => !!window.editor?.view?.scene && !!document.body.dataset["ready"] && !document.getElementById("loading")?.offsetParent,
       null,
       {
         timeout,
@@ -133,8 +155,8 @@ export class Diagram {
       return {
         status: document.querySelector<HTMLElement>(".d2-tip:not([hidden])")?.textContent ?? "",
         diff: pending ? pending.innerText : "",
-        dashed: document.querySelectorAll(".d2-over .prov, .d2-over [stroke-dasharray]").length,
-        highlighted: document.querySelectorAll(".d2-over .target, .d2-over .landing").length,
+        dashed: document.querySelectorAll(".l-ui .prov, .l-ui [stroke-dasharray]").length,
+        highlighted: document.querySelectorAll(".l-ui .target, .l-ui .landing").length,
       };
     });
     if (!release) return { ...mid, frames: [], stats: null };
@@ -159,20 +181,26 @@ export class Diagram {
 
   async colorsAndOrder(): Promise<{ fill: string | null; sameOrder: boolean; hidden: number; leftovers: number }> {
     return this.page.evaluate(() => {
-      const shape = document.querySelector(".d2-svg svg .shape rect, .d2-svg svg .shape path");
+      const shape = document.querySelector(".d2-cam .shape rect, .d2-cam .shape path");
       const fill = shape ? getComputedStyle(shape).fill : null;
-      const inner = document.querySelector(".d2-svg svg > svg")!;
-      const hidden = [...inner.querySelectorAll(":scope > g")].filter(
-        (g) => g.getAttribute("display") === "none" || getComputedStyle(g).opacity === "0",
-      ).length;
-      const over = document.querySelector(".d2-over");
-      const leftovers = document.querySelectorAll("[data-moving]").length + (over ? over.children.length : 0);
-      const tpl = document.createElement("template");
-      tpl.innerHTML = window.editor!.view!.svg;
-      const key = (n: Element) => (n.tagName === "g" ? "g:" + n.getAttribute("class") : n.tagName);
-      const want = [...tpl.content.firstElementChild!.querySelector(":scope > svg")!.children].filter((n) => n.tagName === "g").map(key);
-      const have = [...inner.children].filter((n) => n.tagName === "g" && !n.classList.contains("ghost")).map(key);
-      return { fill, sameOrder: JSON.stringify(want) === JSON.stringify(have), hidden, leftovers };
+      const ids = (layer: string) => [...document.querySelectorAll(`.${layer} > [data-id]`)].map((n) => n.getAttribute("data-id"));
+      const v = window.editor!.view!;
+      const parents = new Set(v.shapes.map((s) => (s.id.includes(".") ? s.id.slice(0, s.id.lastIndexOf(".")) : "")));
+      const depth = (id: string) => id.split(".").length;
+      const groups = v.scene.shapes
+        .filter((p) => parents.has(p.id))
+        .sort((a, b) => depth(a.id) - depth(b.id))
+        .map((p) => p.id);
+      const leaves = v.scene.shapes.filter((p) => !parents.has(p.id)).map((p) => p.id);
+      const conns = v.scene.connections.map((p) => p.id);
+      const sameOrder = JSON.stringify([ids("l-groups"), ids("l-conns"), ids("l-shapes")]) === JSON.stringify([groups, conns, leaves]);
+      const pieces = [...document.querySelectorAll(".d2-cam [data-id]")];
+      const hidden = pieces.filter((g) => g.getAttribute("display") === "none" || getComputedStyle(g).opacity === "0").length;
+      const leftovers =
+        document.querySelector(".l-drag")!.children.length +
+        document.querySelector(".l-ui")!.children.length +
+        pieces.filter((g) => g.hasAttribute("transform")).length;
+      return { fill, sameOrder, hidden, leftovers };
     });
   }
 }

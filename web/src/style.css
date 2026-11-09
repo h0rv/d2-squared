@@ -904,59 +904,45 @@ body[data-ready] #editor {
   cursor: grabbing;
 }
 
-.d2-canvas {
+.d2-scene {
   position: absolute;
-  top: 0;
-  left: 0;
-  will-change: transform;
-  touch-action: none;
-}
-
-.d2-svg svg {
+  inset: 0;
   display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
-.d2-svg > svg > svg > rect:first-child {
-  display: none;
-}
-
-.d2-canvas > .d2-svg {
-  contain: layout paint;
-}
-
-.d2-canvas.dragging .d2-svg svg {
+.d2-scene.dragging {
   shape-rendering: optimizeSpeed;
   text-rendering: optimizeSpeed;
 }
 
-.d2-over,
-.d2-sel {
-  position: absolute;
-  top: 0;
-  left: 0;
-  overflow: visible;
+.d2-scene .l-drag,
+.d2-scene .l-sel,
+.d2-scene .l-ui {
   pointer-events: none;
 }
 
-.d2-over .end-dot {
+.l-ui .end-dot {
   fill: var(--accent);
   stroke: var(--paper);
   stroke-width: 2px;
   vector-effect: non-scaling-stroke;
 }
 
-.d2-over .end-dot.faint {
+.l-ui .end-dot.faint {
   opacity: 0.4;
   stroke-width: 1.5px;
 }
 
-.d2-over .fan-bar {
+.l-ui .fan-bar {
   stroke: var(--accent);
   stroke-linecap: round;
   opacity: 0.14;
 }
 
-.d2-over .hover-box {
+.l-ui .hover-box {
   fill: none;
   stroke: var(--accent);
   stroke-width: 1.5px;
@@ -964,7 +950,7 @@ body[data-ready] #editor {
   vector-effect: non-scaling-stroke;
 }
 
-.d2-sel .sel-box {
+.l-sel .sel-box {
   fill: none;
   stroke: var(--accent);
   stroke-width: 1.5px;
@@ -972,14 +958,14 @@ body[data-ready] #editor {
   vector-effect: non-scaling-stroke;
 }
 
-.d2-over .target {
+.l-ui .target {
   fill: color-mix(in srgb, var(--accent) 12%, transparent);
   stroke: var(--accent);
   stroke-width: 2px;
   vector-effect: non-scaling-stroke;
 }
 
-.d2-over .landing {
+.l-ui .landing {
   fill: color-mix(in srgb, var(--accent) 9%, transparent);
   stroke: var(--accent);
   stroke-width: 1.5px;
@@ -994,28 +980,12 @@ body[data-ready] #editor {
   }
 }
 
-.d2-over .row {
+.l-ui .row {
   fill: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
-.d2-float {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: block;
-  pointer-events: none;
-  will-change: transform;
-}
-
-.d2-float .lift {
+.l-drag .lift {
   filter: drop-shadow(0 12px 16px rgba(20, 24, 36, 0.22)) drop-shadow(0 2px 3px rgba(20, 24, 36, 0.18));
-}
-
-.d2-float .edge-label text {
-  paint-order: stroke;
-  stroke: var(--paper);
-  stroke-width: 4px;
-  stroke-linejoin: round;
 }
 
 .d2-tip {
@@ -1038,7 +1008,7 @@ body[data-ready] #editor {
   .d2-tip {
     color: #0d1220;
   }
-  .d2-float .lift {
+  .l-drag .lift {
     filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.5)) drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
   }
 }

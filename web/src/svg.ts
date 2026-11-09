@@ -10,11 +10,3 @@ export function svgEl<K extends keyof SVGElementTagNameMap>(
   parent?.appendChild(node);
   return node;
 }
-
-export function parseSvg(text: string): { outer: SVGSVGElement; inner: SVGSVGElement } {
-  const tpl = document.createElement("template");
-  tpl.innerHTML = text;
-  const outer = tpl.content.firstElementChild as SVGSVGElement;
-  const inner = outer.querySelector(":scope > svg") as SVGSVGElement;
-  return { outer, inner };
-}

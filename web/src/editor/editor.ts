@@ -1,25 +1,20 @@
 import type { Engine } from "../engine/engine";
-import { cls, contains, depth, midpoint, nameOf, pathD, within } from "../geometry";
-import { parseSvg, svgEl } from "../svg";
+import { midpoint, nameOf, pathD, within } from "../geometry";
+import { svgEl } from "../svg";
 import type { Candidate, Conn, Edit, Path, PendingChange, Point, Shape, Target, View } from "../types";
+import { createHits, type EndSlot } from "./hits";
+import { mountScene, type Piece } from "./scene";
 import { doneText, pickEnd, pickNode, tipFor, type Zone, type ZoneContext } from "./zones";
 
-const EASE = "cubic-bezier(.2,.8,.2,1)";
-const TWEEN_MS = 260;
 const EDGE = 56;
 const MAX_SCROLL = 22;
-const FAN_PX = 16;
-const FAN_HIT_PX = 9;
-const END_HIT_PX = 14;
-const END_HIT_TOUCH_PX = 22;
-const ARROW_HIT_PX = 9;
-const ARROW_HIT_TOUCH_PX = 18;
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 3;
 const FIT_MAX = 1.25;
 const LIFT = 0.03;
 const LIFT_MS = 140;
 const KEEP_PX = 96;
+const PAD = 40;
 
 export interface Insets {
   top: number;
@@ -38,10 +33,12 @@ export interface EditorOptions {
 
 interface Attached {
   conn: Conn;
+  piece: Piece;
   path: SVGPathElement;
   srcInside?: boolean;
   mid0: [number, number];
-  label?: SVGGElement;
+  label: SVGGElement | null;
+  hole: SVGGElement | null;
 }
 
 interface Gesture {
@@ -55,12 +52,6 @@ interface Gesture {
   dist: number;
 }
 
-interface FloatLayer {
-  outer: SVGSVGElement;
-  inner: SVGSVGElement;
-  marker(id: string): string;
-}
-
 interface Drag {
   target: Target;
   start: Point;
@@ -72,10 +63,8 @@ interface Drag {
   abort: AbortController;
   cands: Map<string, Candidate>;
   asked: Set<string>;
-  groups: Element[];
+  moving: Piece[];
   attached: Attached[];
-  hidden: Element[];
-  float: FloatLayer | null;
   client: { clientX: number; clientY: number };
   zone: Zone | null;
   raf: number;
@@ -136,19 +125,18 @@ export interface Editor {
 export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {}): Editor {
   const enabled = new Set(opts.behaviors ?? ["reparent", "reconnect", "pin"]);
   root.classList.add("d2-root");
-  root.innerHTML = `<div class="d2-stage"><div class="d2-canvas"><div class="d2-svg"></div><svg class="d2-sel"></svg><svg class="d2-over"></svg></div></div>
+  root.innerHTML = `<div class="d2-stage"><svg class="d2-scene d2squared"><defs></defs><style></style><g class="d2-cam"><g class="l-groups"></g><g class="l-conns"></g><g class="l-shapes"></g><g class="l-drag"></g><g class="l-sel"></g><g class="l-ui"></g></g></svg></div>
     <div class="d2-tip" aria-hidden="true" hidden></div>`;
   const q = <T extends Element>(sel: string): T => root.querySelector(sel) as T;
   const stage = q<HTMLElement>(".d2-stage");
-  const canvas = q<HTMLElement>(".d2-canvas");
-  const svgHost = q<HTMLElement>(".d2-svg");
-  const over = q<SVGSVGElement>(".d2-over");
-  const selLayer = q<SVGSVGElement>(".d2-sel");
+  const scene = q<SVGSVGElement>(".d2-scene");
+  const cam = q<SVGGElement>(".d2-cam");
+  const { pieces, dragLayer, dock, settleAll, sync, clear } = mountScene(scene);
+  const selLayer = q<SVGGElement>(".l-sel");
+  const over = q<SVGGElement>(".l-ui");
   const tip = q<HTMLElement>(".d2-tip");
 
   let view: View | null = null;
-  let outer: SVGSVGElement | null = null;
-  let inner: SVGSVGElement | null = null;
   let box = { x: 0, y: 0, w: 1, h: 1 };
   let scale = 0.5;
   let tx = 0;
@@ -166,8 +154,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   let pendingExternal: View | null = null;
   let hover: string | null = null;
   let shapes = new Map<string, Shape>();
-  let groups = new Map<string, Element>();
-  let orderTarget: string[] | null = null;
   let rectCache: DOMRect | null = null;
   const stats: NonNullable<Window["d2Stats"]> = { drags: [], last: null };
   window.d2Stats = stats;
@@ -190,30 +176,39 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     enabled,
   });
 
-  function indexView(v: View): void {
-    shapes = new Map(v.shapes.map((s) => [s.id, s]));
-    groups = new Map();
-    for (const child of inner!.children) {
-      const c = child.getAttribute("class");
-      if (child.tagName === "g" && c && c !== "shape") groups.set(c, child);
-    }
-  }
-
-  function readBox(): void {
-    const [x = 0, y = 0, w = 1, h = 1] = inner!.getAttribute("viewBox")!.split(" ").map(Number);
-    box = { x, y, w, h };
-  }
-
-  const rect = (): DOMRect => rectCache ?? (rectCache = outer!.getBoundingClientRect());
+  const rect = (): DOMRect => rectCache ?? (rectCache = stage.getBoundingClientRect());
   window.addEventListener("resize", () => {
     rectCache = null;
   });
 
   const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
 
+  function boundsOf(v: View): typeof box {
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const s of v.shapes) {
+      x0 = Math.min(x0, s.x);
+      y0 = Math.min(y0, s.y);
+      x1 = Math.max(x1, s.x + s.width);
+      y1 = Math.max(y1, s.y + s.height);
+    }
+    for (const c of v.conns) {
+      for (const [x, y] of c.route) {
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
+      }
+    }
+    if (x0 > x1) return { x: 0, y: 0, w: 1, h: 1 };
+    return { x: x0 - PAD, y: y0 - PAD, w: x1 - x0 + 2 * PAD, h: y1 - y0 + 2 * PAD };
+  }
+
   function applyTransform(): void {
     rectCache = null;
-    canvas.style.transform = `translate(${tx}px, ${ty}px)`;
+    cam.setAttribute("transform", `translate(${tx} ${ty}) scale(${scale})`);
     let grid = 24 * scale;
     while (grid < 14) grid *= 2;
     stage.style.setProperty("--grid", `${grid}px`);
@@ -221,38 +216,11 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     stage.style.setProperty("--grid-y", `${ty}px`);
   }
 
-  function sizeCanvas(): void {
-    const w = box.w * scale;
-    const h = box.h * scale;
-    outer!.setAttribute("width", String(w));
-    outer!.setAttribute("height", String(h));
-    canvas.style.width = w + "px";
-    canvas.style.height = h + "px";
-    for (const layer of [over, selLayer]) {
-      layer.setAttribute("width", String(w));
-      layer.setAttribute("height", String(h));
-      layer.setAttribute("viewBox", `${box.x} ${box.y} ${box.w} ${box.h}`);
-    }
-    applyTransform();
-  }
-
-  function mountFresh(v: View): void {
-    orderTarget = null;
-    const p = parseSvg(v.svg);
-    svgHost.replaceChildren(p.outer);
-    outer = p.outer;
-    inner = p.inner;
-    readBox();
-    sizeCanvas();
-    indexView(v);
-    canvas.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
-  }
-
   function keepVisible(): void {
     const w = stage.clientWidth - insets.right;
     const h = stage.clientHeight - insets.bottom;
-    tx = clamp(tx, KEEP_PX - box.w * scale, w - KEEP_PX);
-    ty = clamp(ty, KEEP_PX - box.h * scale, h - KEEP_PX);
+    tx = clamp(tx, KEEP_PX - (box.x + box.w) * scale, w - KEEP_PX - box.x * scale);
+    ty = clamp(ty, KEEP_PX - (box.y + box.h) * scale, h - KEEP_PX - box.y * scale);
   }
 
   function moveView(next: { scale: number; tx: number; ty: number }): void {
@@ -260,13 +228,9 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     scale = next.scale;
     tx = next.tx;
     ty = next.ty;
-    if (!view || !outer) return;
-    if (resized) {
-      sizeCanvas();
-      emit("zoom", scale);
-    } else {
-      applyTransform();
-    }
+    if (!view) return;
+    applyTransform();
+    if (resized) emit("zoom", scale);
   }
 
   function cancelFlight(): void {
@@ -308,7 +272,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     const aw = Math.max(stage.clientWidth - insets.left - insets.right, 40);
     const ah = Math.max(stage.clientHeight - insets.top - insets.bottom, 40);
     const s = clamp(Math.min(aw / box.w, ah / box.h), MIN_SCALE, FIT_MAX);
-    return { scale: s, tx: insets.left + (aw - box.w * s) / 2, ty: insets.top + (ah - box.h * s) / 2 };
+    return { scale: s, tx: insets.left + (aw - box.w * s) / 2 - box.x * s, ty: insets.top + (ah - box.h * s) / 2 - box.y * s };
   }
 
   function fly(to: { scale: number; tx: number; ty: number }, ms = 260): void {
@@ -327,7 +291,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   }
 
   function fit(animate = false): void {
-    if (!view || !outer) return;
+    if (!view) return;
     fitted = true;
     const target = fitTarget();
     if (animate && !matchMedia("(prefers-reduced-motion: reduce)").matches) fly(target);
@@ -340,7 +304,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   function setInsets(next: Insets, animate = false): void {
     insets = next;
     if (fitted) fit(animate);
-    else if (view && outer) {
+    else if (view) {
       keepVisible();
       applyTransform();
     }
@@ -349,7 +313,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   function reveal(id: string): void {
     const s = shapes.get(id);
     if (!s) return;
-    const c = { x: (s.x + s.width / 2 - box.x) * scale + tx, y: (s.y + s.height / 2 - box.y) * scale + ty };
+    const c = { x: (s.x + s.width / 2) * scale + tx, y: (s.y + s.height / 2) * scale + ty };
     const w = stage.clientWidth - insets.right;
     const h = stage.clientHeight - insets.bottom;
     const m = 120;
@@ -365,116 +329,22 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
 
   new ResizeObserver(() => {
     rectCache = null;
-    if (view && outer && fitted) fit();
+    if (view && fitted) fit();
   }).observe(stage);
 
   function toDiagram(ev: { clientX: number; clientY: number }): Point {
     const r = rect();
-    return { x: box.x + (ev.clientX - r.left) / scale, y: box.y + (ev.clientY - r.top) / scale };
+    return { x: (ev.clientX - r.left - tx) / scale, y: (ev.clientY - r.top - ty) / scale };
   }
 
   function toScreen(p: Point): Point {
     const r = rect();
-    return { x: r.left + (p.x - box.x) * scale, y: r.top + (p.y - box.y) * scale };
+    return { x: r.left + p.x * scale + tx, y: r.top + p.y * scale + ty };
   }
 
-  function hitShape(p: Point): Shape | null {
-    let best: Shape | null = null;
-    for (const s of view!.shapes) {
-      if (!contains(s, p)) continue;
-      if (!best || depth(s.id) > depth(best.id) || (depth(s.id) === depth(best.id) && s.width * s.height < best.width * best.height))
-        best = s;
-    }
-    return best;
-  }
-
-  interface EndSlot {
-    conn: Conn;
-    end: "src" | "dst";
-    pt: [number, number];
-    next: [number, number];
-    at: Point;
-    siblings: number;
-    key: string;
-  }
-
-  let slotCache: { version: number; scale: number; slots: EndSlot[] } | null = null;
-
-  function endSlots(): EndSlot[] {
-    const v = view!;
-    if (slotCache && slotCache.version === v.version && slotCache.scale === scale) return slotCache.slots;
-    const groupsByKey = new Map<string, EndSlot[]>();
-    for (const conn of v.conns) {
-      for (const end of ["src", "dst"] as const) {
-        const route = end === "src" ? conn.route : [...conn.route].reverse();
-        const pt = route[0];
-        const next = route[1];
-        if (!pt || !next) continue;
-        const key = `${end === "src" ? conn.src : conn.dst}|${Math.round(pt[0] / 4)}|${Math.round(pt[1] / 4)}`;
-        const slot: EndSlot = { conn, end, pt, next, at: { x: pt[0], y: pt[1] }, siblings: 1, key };
-        groupsByKey.set(key, [...(groupsByKey.get(key) ?? []), slot]);
-      }
-    }
-    const slots: EndSlot[] = [];
-    for (const group of groupsByKey.values()) {
-      group.forEach((slot, i) => {
-        slot.siblings = group.length;
-        if (group.length > 1) {
-          const dx = slot.next[0] - slot.pt[0];
-          const dy = slot.next[1] - slot.pt[1];
-          const len = Math.hypot(dx, dy) || 1;
-          const spread = ((i - (group.length - 1) / 2) * FAN_PX) / scale;
-          slot.at = { x: slot.pt[0] + (-dy / len) * spread, y: slot.pt[1] + (dx / len) * spread };
-        }
-        slots.push(slot);
-      });
-    }
-    slotCache = { version: v.version, scale, slots };
-    return slots;
-  }
+  const { hitShape, endSlots, hitEnd, nearConn } = createHits(() => ({ view: view!, scale, reconnect: enabled.has("reconnect"), armed }));
 
   const isTouch = (type: string): boolean => type === "touch";
-
-  function hitEnd(p: Point, touch = false): EndSlot | null {
-    if (!enabled.has("reconnect")) return null;
-    let best: EndSlot | null = null;
-    let bestDist = Infinity;
-    for (const slot of endSlots()) {
-      if (touch && armed !== slot.conn.id) continue;
-      const px = slot.siblings > 1 ? FAN_HIT_PX : touch ? END_HIT_TOUCH_PX : END_HIT_PX;
-      const d = Math.hypot(slot.at.x - p.x, slot.at.y - p.y);
-      if (d < px / scale && d < bestDist) {
-        best = slot;
-        bestDist = d;
-      }
-    }
-    return best;
-  }
-
-  function segmentDist(p: Point, a: [number, number], b: [number, number]): number {
-    const dx = b[0] - a[0];
-    const dy = b[1] - a[1];
-    const len = dx * dx + dy * dy;
-    const k = len === 0 ? 0 : clamp(((p.x - a[0]) * dx + (p.y - a[1]) * dy) / len, 0, 1);
-    return Math.hypot(p.x - (a[0] + k * dx), p.y - (a[1] + k * dy));
-  }
-
-  function nearConn(p: Point, touch = false): Conn | null {
-    if (!enabled.has("reconnect")) return null;
-    const reach = (touch ? ARROW_HIT_TOUCH_PX : ARROW_HIT_PX) / scale;
-    let best: Conn | null = null;
-    let bestDist = reach;
-    for (const conn of view!.conns) {
-      for (let i = 1; i < conn.route.length; i++) {
-        const d = segmentDist(p, conn.route[i - 1]!, conn.route[i]!);
-        if (d <= bestDist) {
-          best = conn;
-          bestDist = d;
-        }
-      }
-    }
-    return best;
-  }
 
   function drawHandles(conn: Conn | null, end: EndSlot | null, shape: Shape | null): void {
     over.replaceChildren();
@@ -526,18 +396,18 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     a.path.setAttribute("d", pathD(pts, a.path.hasAttribute("marker-start"), a.path.hasAttribute("marker-end")));
     if (a.label) {
       const m = midpoint(pts);
-      a.label.setAttribute("transform", `translate(${m[0] - a.mid0[0]} ${m[1] - a.mid0[1]})`);
+      const t = `translate(${m[0] - a.mid0[0]} ${m[1] - a.mid0[1]})`;
+      a.label.setAttribute("transform", t);
+      a.hole?.setAttribute("transform", t);
     }
   }
-
-  const groupOf = (id: string): Element | undefined => groups.get(cls(id));
 
   function setStatus(text: string, kind: StatusKind = ""): void {
     emit("status", text, kind);
   }
 
   function labelOf(id: string): string {
-    const text = groupOf(id)?.querySelector("text")?.textContent?.trim();
+    const text = pieces.get(id)?.el.querySelector("text")?.textContent?.trim();
     return text || nameOf(id);
   }
 
@@ -603,8 +473,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     svgEl("circle", { cx: d.ptr.x, cy: d.ptr.y, r: 7 * px, class: "end-dot on" }, over);
   }
 
-  function renderTip(d: Drag): void {
-    const text = tipText(d);
+  function showTip(text: string, at: { clientX: number; clientY: number }, touch: boolean): void {
     if (!text) {
       tip.hidden = true;
       return;
@@ -613,13 +482,14 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     tip.hidden = false;
     const w = tip.offsetWidth;
     const h = tip.offsetHeight;
-    const touch = isTouch(d.pointer);
-    let x = d.client.clientX + 16;
-    let y = touch ? d.client.clientY - h - 48 : d.client.clientY + 20;
-    if (x + w > window.innerWidth - 8) x = d.client.clientX - w - 16;
-    if (y + h > window.innerHeight - 8) y = d.client.clientY - h - 16;
+    let x = at.clientX + 16;
+    let y = touch ? at.clientY - h - 48 : at.clientY + 20;
+    if (x + w > window.innerWidth - 8) x = at.clientX - w - 16;
+    if (y + h > window.innerHeight - 8) y = at.clientY - h - 16;
     tip.style.transform = `translate3d(${Math.max(8, x)}px, ${Math.max(8, y)}px, 0)`;
   }
+
+  const renderTip = (d: Drag): void => showTip(tipText(d), d.client, isTouch(d.pointer));
 
   function publishPending(d: Drag): void {
     const model = pendingChange(d);
@@ -651,7 +521,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
 
   function applyFloat(d: Drag): void {
     const t = floatTransform(d, d.cur.dx, d.cur.dy, d.lift);
-    for (const g of d.groups) g.setAttribute("transform", t);
+    for (const p of d.moving) p.el.setAttribute("transform", t);
   }
 
   function attachedPath(d: Drag, a: Attached): [number, number][] {
@@ -685,7 +555,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
         d.stats.routeMs.push(performance.now() - sent);
         if (seq > d.routeApplied) {
           d.routeApplied = seq;
-          d.routed = new Map((res.paths ?? []).map((p) => [p.id, p]));
+          d.routed = new Map(res.paths.map((p) => [p.id, p]));
           d.routedDelta = { dx, dy };
           if (drag === d) {
             drawAttached(d);
@@ -742,9 +612,10 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       (p < lo + EDGE ? -Math.min(1, (lo + EDGE - p) / EDGE) : p > hi - EDGE ? Math.min(1, (p - (hi - EDGE)) / EDGE) : 0) * MAX_SCROLL;
     let vx = speed(c.clientX, r.left, r.right - insets.right);
     let vy = speed(c.clientY, r.top, r.bottom - insets.bottom);
-    const cr = canvas.getBoundingClientRect();
-    if ((vx > 0 && cr.right <= r.right - insets.right) || (vx < 0 && cr.left >= r.left)) vx = 0;
-    if ((vy > 0 && cr.bottom <= r.bottom - insets.bottom) || (vy < 0 && cr.top >= r.top)) vy = 0;
+    const left = r.left + tx + box.x * scale;
+    const top = r.top + ty + box.y * scale;
+    if ((vx > 0 && left + box.w * scale <= r.right - insets.right) || (vx < 0 && left >= r.left)) vx = 0;
+    if ((vy > 0 && top + box.h * scale <= r.bottom - insets.bottom) || (vy < 0 && top >= r.top)) vy = 0;
     if (!vx && !vy) return false;
     const x0 = tx;
     const y0 = ty;
@@ -780,110 +651,46 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     })();
   }
 
-  function makeFloat(): FloatLayer {
-    const o = outer!.cloneNode(false) as SVGSVGElement;
-    const i = inner!.cloneNode(false) as SVGSVGElement;
-    o.setAttribute("class", "d2-float");
-    o.appendChild(i);
-    canvas.insertBefore(o, selLayer);
-    const markers = new Map<string, string>();
-    return {
-      outer: o,
-      inner: i,
-      marker(id: string): string {
-        let copy = markers.get(id);
-        if (!copy) {
-          const src = inner!.querySelector(`marker[id="${id}"]`);
-          if (src) {
-            const dup = src.cloneNode(true) as Element;
-            dup.setAttribute("id", id + "-f");
-            i.appendChild(dup);
-          }
-          copy = id + "-f";
-          markers.set(id, copy);
-        }
-        return copy;
-      },
-    };
-  }
-
-  function floatClone(d: Drag, group: Element): Element {
-    const c = group.cloneNode(true) as Element;
-    for (const m of c.querySelectorAll("marker")) m.remove();
-    for (const n of c.querySelectorAll("[marker-start],[marker-end],[mask]")) {
-      n.removeAttribute("mask");
-      for (const a of ["marker-start", "marker-end"]) {
-        const m = /url\(#(.+)\)/.exec(n.getAttribute(a) ?? "");
-        if (m?.[1]) n.setAttribute(a, `url(#${d.float!.marker(m[1])})`);
-      }
-    }
-    d.float!.inner.appendChild(c);
-    for (const child of group.children) {
-      if (child.tagName !== "marker") {
-        child.setAttribute("display", "none");
-        d.hidden.push(child);
-      }
-    }
-    return c;
-  }
-
-  function wrapExtras(gc: Element, path: Element): SVGGElement | undefined {
-    const extras = Array.from(gc.children).filter((n) => n !== path && n.tagName !== "marker");
-    if (extras.length === 0) return undefined;
-    const wrap = svgEl("g", { class: "edge-label" }, gc);
-    for (const n of extras) wrap.appendChild(n);
-    return wrap;
-  }
-
   function activate(d: Drag): void {
     d.active = true;
-    d.float = makeFloat();
     d.stageRect = stage.getBoundingClientRect();
     const v = view!;
+    const lift = (c: Conn, srcInside: boolean | undefined): void => {
+      const piece = pieces.get(c.id);
+      const path = piece?.el.querySelector<SVGPathElement>("path.connection");
+      if (!piece || !path) return;
+      dragLayer.appendChild(piece.el);
+      const label = piece.el.querySelector<SVGGElement>(".label");
+      const hole = piece.el.querySelector<SVGGElement>(".hole");
+      d.attached.push({ conn: c, piece, path, mid0: midpoint(c.route), label, hole, ...(srcInside === undefined ? {} : { srcInside }) });
+    };
     if (d.target.kind === "node") {
       const rootId = d.target.id;
-      const ids = v.shapes.filter((s) => within(s.id, rootId)).map((s) => s.id);
-      const idSet = new Set(ids);
-      const moving = ids.map(groupOf).filter((g): g is Element => !!g);
-      const insideGroups: Element[] = [];
-      const edges: { conn: Conn; group: Element; srcInside: boolean }[] = [];
+      const idSet = new Set(v.shapes.filter((s) => within(s.id, rootId)).map((s) => s.id));
+      const move = (p: Piece | undefined): void => {
+        if (!p) return;
+        dragLayer.appendChild(p.el);
+        d.moving.push(p);
+      };
+      for (const id of idSet) move(pieces.get(id));
       for (const c of v.conns) {
         const a = idSet.has(c.src);
         const b = idSet.has(c.dst);
-        const g = groupOf(c.id);
-        if (!g) continue;
-        if (a && b) insideGroups.push(g);
-        else if (a || b) edges.push({ conn: c, group: g, srcInside: a });
+        if (a && b) move(pieces.get(c.id));
+        else if (a || b) lift(c, a);
       }
-      const rootGroup = groupOf(rootId);
-      d.groups = [...moving, ...insideGroups].map((g) => {
-        const clone = floatClone(d, g);
-        if (g === rootGroup) clone.classList.add("lift");
-        return clone;
-      });
+      pieces.get(rootId)?.el.classList.add("lift");
       const me = shapes.get(rootId);
       if (me) d.pivot = { x: me.x + me.width / 2, y: me.y + me.height / 2 };
-      for (const e of edges) {
-        const gc = floatClone(d, e.group);
-        const path = gc.querySelector("path");
-        if (!path) continue;
-        const label = wrapExtras(gc, path);
-        d.attached.push({ conn: e.conn, path, srcInside: e.srcInside, mid0: midpoint(e.conn.route), ...(label ? { label } : {}) });
-      }
     } else {
       const edge = d.target.edge;
       const c = v.conns.find((x) => x.id === edge);
-      const g = c && groupOf(c.id);
-      if (!c || !g) return;
-      const gc = floatClone(d, g);
-      const path = gc.querySelector("path");
-      if (!path) return;
-      const label = wrapExtras(gc, path);
-      d.attached.push({ conn: c, path, mid0: midpoint(c.route), ...(label ? { label } : {}) });
+      if (!c) return;
+      lift(c, undefined);
       d.fixed = d.target.end === "dst" ? (c.route[0] ?? null) : (c.route[c.route.length - 1] ?? null);
       d.fixedShape = d.target.end === "dst" ? c.src : c.dst;
     }
-    canvas.classList.add("dragging");
+    scene.classList.add("dragging");
     stage.classList.add("dragging");
     hover = null;
     d.liftAt = performance.now();
@@ -891,10 +698,14 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   }
 
   function restoreGroups(d: Drag): void {
-    for (const n of d.hidden) n.removeAttribute("display");
-    d.hidden = [];
-    d.float?.outer.remove();
-    d.float = null;
+    for (const p of d.moving) dock(p);
+    for (const a of d.attached) {
+      dock(a.piece);
+      a.piece.el.innerHTML = a.piece.svg;
+    }
+    d.moving = [];
+    d.attached = [];
+    settleAll();
   }
 
   function tween(
@@ -917,7 +728,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   }
 
   function endDrag(): void {
-    canvas.classList.remove("dragging");
+    scene.classList.remove("dragging");
     stage.classList.remove("dragging");
     tip.hidden = true;
     emit("pending", null);
@@ -982,7 +793,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       const v = await engine.commit(z.edit, view!.version);
       d.abort.abort();
       d.stats.commitServerMs = v.ms;
-      const floats = d.groups.length && d.target.kind === "node" ? { target: d.target, cur: d.cur } : null;
+      const floats = d.moving.length && d.target.kind === "node" ? { target: d.target, cur: d.cur } : null;
       restoreGroups(d);
       applyView(v, floats);
       d.stats.dropToViewMs = performance.now() - dropAt;
@@ -1014,10 +825,8 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       abort: new AbortController(),
       cands: new Map(),
       asked: new Set(),
-      groups: [],
+      moving: [],
       attached: [],
-      hidden: [],
-      float: null,
       client: { clientX: ev.clientX, clientY: ev.clientY },
       zone: null,
       raf: 0,
@@ -1195,129 +1004,33 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     emit("select", id);
   }
 
-  function tweenEl(node: Element, from: Point, ms = TWEEN_MS): Animation | null {
-    if (!node.animate) return null;
-    return node.animate([{ transform: `translate(${from.x}px, ${from.y}px)` }, { transform: "translate(0px, 0px)" }], {
-      duration: ms,
-      easing: EASE,
-    });
-  }
-
-  function fade(node: Element, from: number, to: number, ms = TWEEN_MS): Animation | null {
-    return node.animate ? node.animate([{ opacity: from }, { opacity: to }], { duration: ms, easing: "ease-out" }) : null;
-  }
-
-  function keyOf(node: Element): string {
-    if (node.tagName === "g") return "g:" + node.getAttribute("class");
-    return node.tagName + ":" + (node.getAttribute("id") ?? "");
-  }
-
   function applyView(v: View, floats: { target: Target; cur: { dx: number; dy: number } } | null = null): void {
     if (v.error) {
       emit("error", v.error);
       if (!view || v.version > view.version) view = { ...(view ?? v), error: v.error, version: v.version };
       return;
     }
-    settleOrder();
-    const prev = view;
-    if (!prev || (prev.error && !prev.svg) || v.cause === "open" || !outer || !inner) {
-      view = v;
+    const prev = view?.scene ? view : null;
+    const fresh = !prev || v.cause === "open";
+    const floating = new Map<string, { dx: number; dy: number }>();
+    if (floats?.target.kind === "node" && prev) {
+      for (const s of prev.shapes) if (within(s.id, floats.target.id)) floating.set(s.id, floats.cur);
+    }
+    const old = view;
+    view = v;
+    shapes = new Map(v.shapes.map((s) => [s.id, s]));
+    box = boundsOf(v);
+    if (fresh) {
       selected = "";
       armed = "";
-      mountFresh(v);
+      clear();
+    }
+    sync(v, fresh ? null : prev, floating);
+    if (fresh) {
       fit();
-      finishApply(prev, v);
-      return;
+      cam.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
     }
-    const p = parseSvg(v.svg);
-    const oldBox = box;
-    const floating = new Map<string, { dx: number; dy: number }>();
-    if (floats && floats.target.kind === "node") {
-      const rootId = floats.target.id;
-      for (const s of prev.shapes) if (within(s.id, rootId)) floating.set(s.id, floats.cur);
-    }
-    for (const g of inner.querySelectorAll(":scope > g[transform]")) g.removeAttribute("transform");
-    const oldChildren = new Map<string, Element>();
-    for (const child of inner.children) oldChildren.set(keyOf(child), child);
-    inner.setAttribute("viewBox", p.inner.getAttribute("viewBox") ?? "");
-    for (const name of ["width", "height"]) inner.setAttribute(name, p.inner.getAttribute(name) ?? "");
-    outer.setAttribute("viewBox", p.outer.getAttribute("viewBox") ?? "");
-    view = v;
-    readBox();
-    sizeCanvas();
-    const ghosts: Element[] = [];
-    const animations: (Animation | null)[] = [];
-    const origin = { x: box.x - oldBox.x, y: box.y - oldBox.y };
-    const newShapeByClass = new Map(v.shapes.map((s) => [cls(s.id), s]));
-    const oldShapeByClass = new Map(prev.shapes.map((s) => [cls(s.id), s]));
-    const desired: { node: Element; old: Element | undefined; reused: boolean; cls: string }[] = [];
-    for (const child of Array.from(p.inner.children)) {
-      const old = oldChildren.get(keyOf(child));
-      const reused = !!old && old.outerHTML === child.outerHTML;
-      desired.push({ node: reused && old ? old : child, old, reused, cls: child.getAttribute("class") ?? "" });
-    }
-    const live = new Set(desired.map((x) => x.node));
-    for (const old of oldChildren.values()) if (!live.has(old)) old.remove();
-    let cursor = inner.firstElementChild;
-    for (const x of desired) {
-      if (x.node === cursor) {
-        cursor = cursor.nextElementSibling;
-        continue;
-      }
-      inner.insertBefore(x.node, cursor);
-    }
-    for (const x of desired) {
-      if (x.node.parentNode !== inner) continue;
-      const sh = newShapeByClass.get(x.cls);
-      const osh = oldShapeByClass.get(x.cls);
-      if (x.reused) {
-        if (origin.x || origin.y) animations.push(tweenEl(x.node, { x: -origin.x, y: -origin.y }));
-        continue;
-      }
-      if (sh) {
-        const f = floating.get(sh.id) ?? { dx: 0, dy: 0 };
-        if (osh && osh.width === sh.width && osh.height === sh.height) {
-          const off = { x: osh.x + f.dx - sh.x - origin.x, y: osh.y + f.dy - sh.y - origin.y };
-          if (Math.abs(off.x) > 0.5 || Math.abs(off.y) > 0.5) {
-            animations.push(tweenEl(x.node, off));
-            (x.node as HTMLElement).dataset["moving"] = "1";
-          }
-        } else {
-          animations.push(fade(x.node, 0, 1));
-          if (x.old) ghosts.push(x.old);
-        }
-      } else if (x.node.tagName === "g") {
-        animations.push(fade(x.node, 0, 1));
-        if (x.old) ghosts.push(x.old);
-      }
-    }
-    for (const g of ghosts) {
-      const clone = g.cloneNode(true) as Element;
-      clone.classList.add("ghost");
-      inner.insertBefore(clone, inner.firstElementChild);
-      const a = fade(clone, 1, 0);
-      (a ? a.finished : Promise.resolve()).then(
-        () => clone.remove(),
-        () => clone.remove(),
-      );
-    }
-    for (const n of inner.querySelectorAll(':scope > g[data-moving="1"]')) inner.appendChild(n);
-    indexView(v);
-    const finished = animations.filter((a): a is Animation => !!a).map((a) => a.finished.catch(() => {}));
-    orderTarget = desired.map((x) => x.cls);
-    void Promise.all(finished).then(settleOrder);
-    setTimeout(settleOrder, 1500);
-    finishApply(prev, v);
-  }
-
-  function settleOrder(): void {
-    const target = orderTarget;
-    if (!target || !inner) return;
-    const want = target.map((c) => groups.get(c) ?? null);
-    const present = want.filter((n): n is Element => !!n);
-    const cur = Array.from(inner.children).filter((n) => present.includes(n));
-    if (cur.some((n, i) => n !== present[i])) for (const n of present) inner.insertBefore(n, inner.querySelector(":scope > mask"));
-    for (const n of inner.querySelectorAll("[data-moving]")) delete (n as HTMLElement).dataset["moving"];
+    finishApply(old, v);
   }
 
   function finishApply(prev: View | null, v: View): void {
