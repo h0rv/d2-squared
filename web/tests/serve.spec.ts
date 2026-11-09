@@ -233,6 +233,29 @@ for (const scheme of ["dark", "light"] as const) {
   });
 }
 
+test("serve: ELK is saved to the file and the exports download", async ({ page, serve }) => {
+  const served = await serve("arch.d2");
+  const d = await open(page, served.url);
+  await page.click("#more");
+  await page.click('[data-engine="elk"]');
+  await page.waitForFunction(() => window.editor!.view!.config.engine === "elk", null, { timeout: 60_000 });
+  await d.idle();
+  expect(served.source()).toMatch(/layout-engine: elk/);
+  await page.click("#view-text");
+  await expect(page.locator("#text-out")).toContainText("Postgres");
+  await page.click("#view-diagram");
+  for (const [kind, name] of [
+    ["svg", "diagram.svg"],
+    ["png", "diagram.png"],
+    ["text", "diagram.txt"],
+  ] as const) {
+    await page.click("#more");
+    const [download] = await Promise.all([page.waitForEvent("download"), page.click(`[data-export="${kind}"]`)]);
+    expect(download.suggestedFilename()).toBe(name);
+    expect(readFileSync((await download.path())!).length).toBeGreaterThan(100);
+  }
+});
+
 const centerGap = (page: import("@playwright/test").Page) =>
   page.evaluate(() => {
     const out = document.getElementById("text-out")!.getBoundingClientRect();

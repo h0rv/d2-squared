@@ -10,6 +10,7 @@ import { mountToasts, type Toasts } from "../ui/toast";
 import { EXAMPLES } from "./examples";
 import { exportAs, type ExportKind } from "./export";
 import { LocalFile } from "./files";
+import { wireSettings } from "./settings";
 import { decodeShare, encodeShare } from "./share";
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -108,9 +109,15 @@ function wireCanvas(editor: Editor, chrome: Chrome): void {
   const { panel, toasts, textView } = chrome;
   const undo = $<HTMLButtonElement>("undo");
   const redo = $<HTMLButtonElement>("redo");
+  const paintSettings = wireSettings(editor, closeMenu);
   editor.on("view", (v) => {
     panel.setSource(v);
+    paintSettings(v);
     textView.refresh();
+    if (hintState.limited !== (v.config.engine !== "tala")) {
+      hintState.limited = v.config.engine !== "tala";
+      paintHint();
+    }
     undo.disabled = !v.canUndo;
     redo.disabled = !v.canRedo;
   });
@@ -192,20 +199,34 @@ function wireMenu(): void {
   });
 }
 
+const HINT_TEXT = "Drag a box into another group, or drag an arrow's end onto another box";
+const HINT_LIMITED = "Placing boxes needs the TALA layout engine. You can still move boxes into groups and reconnect arrows.";
+
+const hintState = { armed: false, limited: false };
+
+function paintHint(): void {
+  const hint = $("hint");
+  const wanted = hintState.armed && (hintState.limited || store.get(HINT_KEY) !== "1");
+  hint.textContent = hintState.limited ? HINT_LIMITED : HINT_TEXT;
+  hint.hidden = !wanted;
+  hint.classList.toggle("gone", !wanted);
+  document.body.classList.toggle("hint-on", wanted);
+}
+
 function dismissHint(): void {
+  if (hintState.limited) return;
   store.set(HINT_KEY, "1");
   const hint = $("hint");
   hint.classList.add("gone");
   document.body.classList.remove("hint-on");
   window.setTimeout(() => {
-    hint.hidden = true;
+    if (!hintState.limited) hint.hidden = true;
   }, 400);
 }
 
 function showHint(): void {
-  if (store.get(HINT_KEY) === "1") return;
-  $("hint").hidden = false;
-  document.body.classList.add("hint-on");
+  hintState.armed = true;
+  paintHint();
 }
 
 function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custom: boolean }): void {

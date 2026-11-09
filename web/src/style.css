@@ -417,12 +417,49 @@ select {
     0 1px 3px rgba(20, 24, 36, 0.1);
 }
 
+.menu-item.spread {
+  justify-content: space-between;
+}
+
+.tick {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1.5px solid var(--muted);
+}
+
+[aria-checked="true"] > .tick {
+  border-color: var(--accent);
+  background: var(--accent)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 8.5 2.5 2.5L12 5.5'/%3E%3C/svg%3E")
+    center / 12px no-repeat;
+}
+
 .mini-seg.words .menu-item {
   width: auto;
   height: 28px;
   padding: 0 9px;
   font-size: 12px;
   font-weight: 500;
+}
+
+.mini-seg.words .menu-item[aria-checked="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.menu-row label {
+  flex: none;
+}
+
+.menu-select {
+  width: 156px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--solid);
+  cursor: pointer;
 }
 
 .text-view {

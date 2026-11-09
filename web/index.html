@@ -63,6 +63,26 @@
       <button id="tidy" class="menu-item" role="menuitem" hidden>Tidy up</button>
       <button id="reset" class="menu-item" role="menuitem">Reset layout</button>
       <hr />
+      <div class="menu-row" role="group" aria-label="Layout engine">
+        <span>Layout engine</span>
+        <div class="mini-seg words">
+          <button class="menu-item" role="menuitemradio" aria-checked="false" data-engine="tala">TALA</button>
+          <button class="menu-item" role="menuitemradio" aria-checked="false" data-engine="elk">ELK</button>
+          <button class="menu-item" role="menuitemradio" aria-checked="false" data-engine="dagre">dagre</button>
+        </div>
+      </div>
+      <button id="sketch" class="menu-item spread" role="menuitemcheckbox" aria-checked="false">
+        <span>Sketch</span><span class="tick" aria-hidden="true"></span>
+      </button>
+      <div class="menu-row">
+        <label for="theme">Theme</label>
+        <select id="theme" class="menu-select"></select>
+      </div>
+      <div class="menu-row">
+        <label for="dark-theme">Dark theme</label>
+        <select id="dark-theme" class="menu-select"></select>
+      </div>
+      <hr />
       <div class="menu-row" role="group" aria-label="Export">
         <span>Export</span>
         <div class="mini-seg words">
