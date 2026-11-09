@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
     <title>D2 squared</title>
     <meta name="description" content="D2 × Declarative Dragging. Drag D2 diagrams, and each drag is saved as an edit to the .d2 file." />
     <link
@@ -11,64 +12,93 @@
     />
   </head>
   <body>
-    <header>
-      <strong class="brand">D2<sup>2</sup></strong>
-      <select id="example" aria-label="Example" hidden></select>
-      <span id="filename" class="muted" hidden></span>
-      <span class="grow"></span>
-      <button id="undo" title="Undo (Cmd/Ctrl-Z)" disabled>Undo</button>
-      <button id="redo" title="Redo (Shift-Cmd/Ctrl-Z)" disabled>Redo</button>
-      <button id="source-toggle" aria-pressed="true">Source</button>
-      <details id="more" class="menu">
-        <summary>More</summary>
-        <div class="menu-body">
-          <label
-            >Layout flows
-            <select id="dir" title="Click a box first to change only that box.">
-              <option value="">choose…</option>
-              <option value="down">Down</option>
-              <option value="right">Right</option>
-              <option value="up">Up</option>
-              <option value="left">Left</option>
-            </select>
-          </label>
-          <button id="unpin" title="Remove the positions the editor wrote and lay everything out again">Reset positions</button>
-          <label>Zoom <input type="range" id="zoom" min="0.1" max="1.5" step="0.05" value="0.5" aria-label="Zoom" /></label>
-          <button id="fit">Fit to window</button>
-          <hr class="site-only" />
-          <button id="open" class="site-only">Open a .d2 file…</button>
-          <button id="save" class="site-only">Save to a file</button>
-          <button id="share" class="site-only">Copy link to this diagram</button>
+    <main id="editor" aria-label="Diagram canvas"></main>
+
+    <div id="brand" class="surface pill">
+      <strong class="logo">D2<sup>2</sup></strong>
+      <span id="tagline" class="muted">D2 × Declarative Dragging</span>
+      <a
+        id="github"
+        class="icon-btn"
+        href="https://github.com/h0rv/d2-squared"
+        target="_blank"
+        rel="noopener"
+        aria-label="D2² on GitHub"
+        data-tip="GitHub"
+      ></a>
+    </div>
+
+    <div id="examples" class="top-center" hidden>
+      <div id="chips" class="surface segmented" role="radiogroup" aria-label="Example diagram"></div>
+      <select id="example" class="surface select" aria-label="Example diagram"></select>
+    </div>
+
+    <div id="toolbar" class="surface toolbar">
+      <button id="undo" class="icon-btn" aria-label="Undo" data-tip="Undo" disabled></button>
+      <button id="redo" class="icon-btn" aria-label="Redo" data-tip="Redo" disabled></button>
+      <span class="sep"></span>
+      <button id="code-toggle" class="btn" aria-pressed="false" aria-controls="code" aria-label="Code" data-tip="Show the D2 code"></button>
+      <button id="more" class="icon-btn" aria-label="More" aria-haspopup="menu" aria-expanded="false" data-tip="More"></button>
+    </div>
+
+    <div id="menu" class="surface menu" role="menu" aria-label="More" hidden>
+      <button id="open" class="menu-item site-only" role="menuitem">Open file…</button>
+      <button id="save" class="menu-item site-only" role="menuitem">Save file</button>
+      <button id="share" class="menu-item site-only" role="menuitem">Share link</button>
+      <hr class="site-only" />
+      <div class="menu-row" role="group" aria-label="Layout direction">
+        <span id="dir-label">Layout direction</span>
+        <div class="mini-seg">
+          <button class="menu-item" role="menuitem" data-dir="down" aria-label="Down" data-tip="Down"></button>
+          <button class="menu-item" role="menuitem" data-dir="right" aria-label="Right" data-tip="Right"></button>
+          <button class="menu-item" role="menuitem" data-dir="up" aria-label="Up" data-tip="Up"></button>
+          <button class="menu-item" role="menuitem" data-dir="left" aria-label="Left" data-tip="Left"></button>
         </div>
-      </details>
-    </header>
-    <main id="editor"></main>
-    <div id="statusbar"><span id="status">Loading…</span></div>
-    <aside id="panel">
-      <h2>
-        <span>File</span>
+      </div>
+      <button id="reset" class="menu-item" role="menuitem">Reset layout</button>
+    </div>
+
+    <div id="hint" class="surface chip hint" hidden>Drag a box into another group, or drag an arrow's end onto another box</div>
+
+    <div id="zoom" class="surface zoom" role="group" aria-label="Zoom">
+      <button id="zoom-out" class="icon-btn" aria-label="Zoom out" data-tip="Zoom out"></button>
+      <span id="zoom-level" class="zoom-level" aria-live="off">100%</span>
+      <button id="zoom-in" class="icon-btn" aria-label="Zoom in" data-tip="Zoom in"></button>
+      <button id="fit" class="icon-btn" aria-label="Fit to screen" data-tip="Fit to screen"></button>
+    </div>
+
+    <div id="toast" class="surface toast" role="status" aria-live="polite" hidden></div>
+
+    <aside id="code" class="surface code" aria-label="D2 code" aria-hidden="true">
+      <div id="code-resize" class="grip" role="separator" aria-label="Resize the code panel" tabindex="0"></div>
+      <header class="code-head">
+        <span class="code-title">Code</span>
+        <span id="code-note" class="muted"></span>
         <span class="grow"></span>
-        <button id="edit" class="small site-only">Edit</button>
-        <button id="apply" class="small site-only" hidden>Apply</button>
-        <button id="cancel" class="small site-only" hidden>Cancel</button>
-      </h2>
-      <pre id="source"></pre>
-      <textarea id="source-edit" spellcheck="false" hidden></textarea>
-      <details class="help">
-        <summary>How to use</summary>
-        <ul>
-          <li>Drag a box onto a group to move it inside, or onto empty space to place it there.</li>
-          <li>Drag the dot at the end of an arrow onto another box to reconnect it.</li>
-          <li>Hold Alt to always place a box instead of moving it into a group.</li>
-          <li>Esc cancels a drag. Cmd/Ctrl-Z undoes. Double-click a placed box to release its position.</li>
-        </ul>
-      </details>
+        <button id="code-close" class="icon-btn" aria-label="Close code" data-tip="Close"></button>
+      </header>
+      <div id="code-scroll" class="code-scroll">
+        <div class="code-stack">
+          <pre id="code-lines" class="code-lines"></pre>
+          <textarea
+            id="code-input"
+            class="code-input"
+            spellcheck="false"
+            autocapitalize="off"
+            autocomplete="off"
+            wrap="off"
+            aria-label="D2 source"
+          ></textarea>
+        </div>
+      </div>
+      <div id="code-error" class="code-error" role="alert" hidden></div>
     </aside>
-    <div id="loading" class="loading" hidden>
+
+    <div id="loading" class="loading">
       <div class="loading-card">
-        <div id="loading-text">Loading the layout engine…</div>
-        <progress id="loading-bar" max="1"></progress>
-        <div id="loading-note" class="muted">About 9 MB, once. Then it works offline.</div>
+        <div id="loading-text" class="loading-text">Loading the layout engine…</div>
+        <div class="bar"><div id="loading-bar" class="bar-fill"></div></div>
+        <div id="loading-note" class="muted">About 9 MB, downloaded once.</div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

@@ -1,8 +1,11 @@
 import type { Engine } from "../engine/engine";
 import { HttpEngine, probeServe } from "../engine/http-engine";
 import { mount, type Editor } from "../editor/editor";
-import type { View } from "../types";
-import { DEFAULT_HINT, EXAMPLES, type Example } from "./examples";
+import { mountCode, type CodePanel } from "../ui/code";
+import { ICONS, type IconName } from "../ui/icons";
+import { store } from "../ui/store";
+import { mountToasts, type Toasts } from "../ui/toast";
+import { EXAMPLES } from "./examples";
 import { LocalFile } from "./files";
 import { decodeShare, encodeShare } from "./share";
 
@@ -14,17 +17,25 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 declare const WASM_BYTES: number;
 
+const HINT_KEY = "d2sq.hint";
+const MOD = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
+const PHONE = "(max-width: 700px)";
+
 function showLoading(text: string, fraction: number | null): void {
-  $("loading").hidden = false;
   $("loading-text").textContent = text;
-  const bar = $<HTMLProgressElement>("loading-bar");
-  if (fraction === null) bar.removeAttribute("value");
-  else bar.value = fraction;
+  const bar = $("loading-bar");
+  bar.classList.toggle("indeterminate", fraction === null);
+  bar.style.transform = `scaleX(${fraction ?? 1})`;
 }
 
-const hideLoading = () => {
-  $("loading").hidden = true;
-};
+function hideLoading(): void {
+  const loading = $("loading");
+  loading.classList.add("done");
+  document.body.dataset["ready"] = "1";
+  window.setTimeout(() => {
+    loading.hidden = true;
+  }, 360);
+}
 
 async function createWasmEngine(): Promise<Engine> {
   const [{ loadWasm }, { WasmEngine }] = await Promise.all([import("../engine/load-wasm"), import("../engine/wasm-engine")]);
@@ -38,175 +49,260 @@ async function createWasmEngine(): Promise<Engine> {
   return WasmEngine.create(module, requested > 0 ? { workers: requested } : {});
 }
 
-function renderSource(v: View): void {
-  const pre = $("source");
-  const changed = new Set(v.changed ?? []);
-  const frag = document.createDocumentFragment();
-  let first: HTMLElement | null = null;
-  v.source
-    .replace(/\n$/, "")
-    .split("\n")
-    .forEach((line, i) => {
-      const row = document.createElement("div");
-      const hit = changed.has(i + 1);
-      row.className = "ln" + (hit ? " hl" : "");
-      row.dataset["n"] = String(i + 1);
-      row.textContent = line || " ";
-      if (hit && !first) first = row;
-      frag.appendChild(row);
-    });
-  pre.replaceChildren(frag);
-  (first as HTMLElement | null)?.scrollIntoView({ block: "center" });
+function paintIcons(): void {
+  const map: Record<string, IconName> = {
+    github: "github",
+    undo: "undo",
+    redo: "redo",
+    more: "more",
+    "zoom-out": "minus",
+    "zoom-in": "plus",
+    fit: "fit",
+    "code-close": "close",
+  };
+  for (const [id, name] of Object.entries(map)) $(id).innerHTML = ICONS[name];
+  $("code-toggle").innerHTML = `${ICONS.code}<span>Code</span>`;
+  for (const button of document.querySelectorAll<HTMLElement>("[data-dir]")) button.innerHTML = ICONS[button.dataset["dir"] as IconName];
+  $("undo").dataset["tip"] = `Undo · ${MOD}Z`;
+  $("redo").dataset["tip"] = `Redo · ${MOD === "⌘" ? "⇧⌘Z" : "Ctrl+Shift+Z"}`;
+  $("fit").dataset["tip"] = "Fit to screen · F";
 }
 
-function wireStatus(editor: Editor): void {
-  editor.on("status", (text, kind, title) => {
-    if (text !== undefined) {
-      const status = $("status");
-      status.textContent = text;
-      status.className = kind ?? "";
-      status.title = title ?? "";
-      if (kind === "done" && !$<HTMLButtonElement>("undo").disabled && text !== "Undone") {
-        const link = document.createElement("button");
-        link.textContent = "Undo";
-        link.className = "link";
-        link.onclick = () => void editor.undo();
-        status.append(" · ", link);
-      }
-    }
-    $<HTMLInputElement>("zoom").value = String(editor.scale);
-  });
+interface Chrome {
+  panel: CodePanel;
+  toasts: Toasts;
+}
+
+function wireCanvas(editor: Editor, chrome: Chrome): void {
+  const { panel, toasts } = chrome;
+  const undo = $<HTMLButtonElement>("undo");
+  const redo = $<HTMLButtonElement>("redo");
   editor.on("view", (v) => {
-    renderSource(v);
-    $<HTMLButtonElement>("undo").disabled = !v.canUndo;
-    $<HTMLButtonElement>("redo").disabled = !v.canRedo;
+    panel.setSource(v);
+    undo.disabled = !v.canUndo;
+    redo.disabled = !v.canRedo;
+  });
+  editor.on("pending", (change) => panel.setPending(change));
+  editor.on("error", (message) => {
+    panel.setError(message);
+    if (message && !panel.open) toasts.show(message, { error: true, ms: 6000 });
+  });
+  editor.on("status", (text, kind) => {
+    if (kind === "busy") toasts.busy(text);
+    else if (kind === "err") toasts.show(text, { error: true, ms: 6000 });
+    else if (kind === "done") {
+      const history = text === "Undone" || text === "Redone";
+      toasts.show(text, !history && !undo.disabled ? { action: { label: "Undo", run: () => void editor.undo() } } : {});
+    }
+  });
+  editor.on("zoom", (scale) => {
+    $("zoom-level").textContent = `${Math.round(scale * 100)}%`;
   });
   editor.on("select", (id) => {
-    $<HTMLSelectElement>("dir").dataset["target"] = id;
+    $("dir-label").textContent = id ? `Direction inside ${editor.label(id)}` : "Layout direction";
   });
+  undo.onclick = () => void editor.undo();
+  redo.onclick = () => void editor.redo();
+  $("fit").onclick = () => editor.fit(true);
+  $("zoom-in").onclick = () => editor.zoomBy(1.25);
+  $("zoom-out").onclick = () => editor.zoomBy(0.8);
+  $("reset").onclick = () => {
+    closeMenu();
+    void editor.send({ kind: "unpin", key: "" });
+  };
+  for (const button of document.querySelectorAll<HTMLElement>("[data-dir]")) {
+    button.onclick = () => {
+      closeMenu();
+      void editor.send({ kind: "direction", key: editor.selected, to: button.dataset["dir"] ?? "" });
+    };
+  }
 }
 
-function wireControls(editor: Editor): void {
-  $("undo").onclick = () => void editor.undo();
-  $("redo").onclick = () => void editor.redo();
-  $("fit").onclick = () => editor.fit();
-  $<HTMLInputElement>("zoom").oninput = (e) => editor.setScale(parseFloat((e.target as HTMLInputElement).value));
-  $("unpin").onclick = () => void editor.send({ kind: "unpin", key: "" });
-  $<HTMLSelectElement>("dir").onchange = (e) => {
-    const select = e.target as HTMLSelectElement;
-    if (select.value) void editor.send({ kind: "direction", key: editor.selected, to: select.value });
-    select.value = "";
+function closeMenu(): void {
+  const menu = $("menu");
+  if (menu.hidden) return;
+  menu.hidden = true;
+  $("more").setAttribute("aria-expanded", "false");
+}
+
+function wireMenu(): void {
+  const menu = $("menu");
+  const items = (): HTMLElement[] => [...menu.querySelectorAll<HTMLElement>(".menu-item")].filter((n) => !n.closest("[hidden]"));
+  $("more").onclick = (e) => {
+    e.stopPropagation();
+    if (!menu.hidden) return closeMenu();
+    menu.hidden = false;
+    $("more").setAttribute("aria-expanded", "true");
+    items()[0]?.focus();
   };
-  $("source-toggle").onclick = () => {
-    const hidden = document.body.classList.toggle("no-panel");
-    $("source-toggle").setAttribute("aria-pressed", String(!hidden));
-    requestAnimationFrame(() => editor.fit());
-  };
-  document.addEventListener("click", (e) => {
-    const menu = $<HTMLDetailsElement>("more");
-    if (menu.open && !menu.contains(e.target as Node)) menu.open = false;
+  document.addEventListener("pointerdown", (e) => {
+    if (!menu.hidden && !menu.contains(e.target as Node) && !$("more").contains(e.target as Node)) closeMenu();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") $<HTMLDetailsElement>("more").open = false;
+    if (menu.hidden) return;
+    if (e.key === "Escape") {
+      closeMenu();
+      $("more").focus();
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const list = items();
+      const at = list.indexOf(document.activeElement as HTMLElement);
+      list[(at + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length]?.focus();
+    }
   });
 }
 
-function wireSiteControls(engine: Engine, editor: Editor, hint: { current: string }): void {
-  const reload = engine.reload?.bind(engine);
+function dismissHint(): void {
+  store.set(HINT_KEY, "1");
+  const hint = $("hint");
+  hint.classList.add("gone");
+  document.body.classList.remove("hint-on");
+  window.setTimeout(() => {
+    hint.hidden = true;
+  }, 400);
+}
+
+function showHint(): void {
+  if (store.get(HINT_KEY) === "1") return;
+  $("hint").hidden = false;
+  document.body.classList.add("hint-on");
+}
+
+function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custom: boolean }): void {
   const open = engine.open?.bind(engine);
-  if (!reload || !open) return;
+  if (!open) return;
   const local = new LocalFile();
   const select = $<HTMLSelectElement>("example");
-  select.hidden = false;
-  for (const ex of EXAMPLES) select.add(new Option(ex.title, ex.id));
-  const load = async (source: string, text: string): Promise<void> => {
-    hint.current = text;
-    $<HTMLTextAreaElement>("source-edit").hidden = true;
-    $("source").hidden = false;
-    setEditing(false);
-    await open(source);
+  const chips = $("chips");
+  const choose = (id: string): void => {
+    select.value = id;
+    for (const chip of chips.querySelectorAll<HTMLButtonElement>("button"))
+      chip.setAttribute("aria-checked", String(chip.dataset["example"] === id));
   };
-  const setEditing = (on: boolean): void => {
-    $("edit").hidden = on;
-    $("apply").hidden = !on;
-    $("cancel").hidden = !on;
-    $("source").hidden = on;
-    $<HTMLTextAreaElement>("source-edit").hidden = !on;
-    if (on) {
-      const area = $<HTMLTextAreaElement>("source-edit");
-      area.value = editor.view?.source ?? "";
-      area.focus();
+  const addExample = (id: string, title: string): void => {
+    select.add(new Option(title, id));
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip-btn";
+    chip.setAttribute("role", "radio");
+    chip.dataset["example"] = id;
+    chip.textContent = title;
+    chip.setAttribute("aria-checked", "false");
+    chip.onclick = () => select.value !== id && pick(id);
+    chips.append(chip);
+  };
+  const load = async (source: string): Promise<void> => {
+    toasts.busy("Laying out the diagram…");
+    try {
+      await open(source);
+    } finally {
+      toasts.hide();
     }
   };
-  const apply = async (): Promise<void> => {
-    await reload($<HTMLTextAreaElement>("source-edit").value);
-    if (!editor.view?.error) setEditing(false);
+  const pick = (id: string): void => {
+    const ex = EXAMPLES.find((x) => x.id === id);
+    if (!ex) return;
+    choose(id);
+    history.replaceState(null, "", location.pathname + location.search);
+    void load(ex.source);
   };
-  select.onchange = () => {
-    const ex = EXAMPLES.find((x) => x.id === select.value);
-    if (ex) void load(ex.source, ex.hint);
+  const addCustom = (title: string): void => {
+    for (const node of document.querySelectorAll('[data-example="custom"], option[value="custom"]')) node.remove();
+    addExample("custom", title);
+    choose("custom");
   };
-  $("edit").onclick = () => setEditing(true);
-  $("cancel").onclick = () => setEditing(false);
-  $("apply").onclick = () => void apply();
-  $<HTMLTextAreaElement>("source-edit").onkeydown = (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void apply();
-    if (e.key === "Escape") setEditing(false);
-  };
+  for (const ex of EXAMPLES) addExample(ex.id, ex.title);
+  select.onchange = () => pick(select.value);
+  $("examples").hidden = false;
+  if (state.custom) addCustom("Shared diagram");
+  else choose(EXAMPLES[0]!.id);
+
   $("open").onclick = async () => {
-    $<HTMLDetailsElement>("more").open = false;
+    closeMenu();
     const file = await local.open();
-    if (file) {
-      select.add(new Option(file.name, "file"));
-      select.value = "file";
-      await load(file.text, DEFAULT_HINT);
-    }
+    if (!file) return;
+    addCustom(file.name);
+    await load(file.text);
   };
   $("save").onclick = async () => {
-    $<HTMLDetailsElement>("more").open = false;
+    closeMenu();
     const name = await local.save(editor.view?.source ?? "");
-    if (name) $("status").textContent = `Saved ${name}`;
+    if (name) toasts.show(`Saved ${name}`);
   };
   $("share").onclick = async () => {
-    $<HTMLDetailsElement>("more").open = false;
+    closeMenu();
     const hash = await encodeShare(editor.view?.source ?? "");
     history.replaceState(null, "", hash);
     try {
       await navigator.clipboard.writeText(location.href);
-      $("status").textContent = "Link copied";
+      toasts.show("Link copied");
     } catch {
-      $("status").textContent = "The link is in the address bar";
+      toasts.show("The link is in the address bar");
     }
   };
 }
 
+function firstView(editor: Editor): Promise<void> {
+  if (editor.view) return Promise.resolve();
+  return new Promise((resolve) => {
+    editor.on("view", () => resolve());
+    editor.on("error", (message) => message && resolve());
+  });
+}
+
 export async function start(): Promise<void> {
+  paintIcons();
+  wireMenu();
   const base = import.meta.env.BASE_URL;
   const info = import.meta.env.MODE === "production" ? null : await probeServe(base);
-  const hint = { current: DEFAULT_HINT };
   const engine: Engine = info ? new HttpEngine(base) : await createWasmEngine();
-  const editor = mount($("editor"), engine, { hint: () => hint.current });
+  const toasts = mountToasts($("toast"));
+  const phone = matchMedia(PHONE);
+  let editor: Editor | null = null;
+  const layout = (animate: boolean): void => {
+    if (!editor) return;
+    const extent = panel.extent();
+    const top = phone.matches && !info ? 112 : 72;
+    const pad = phone.matches ? { left: 16, right: 16, bottom: extent.bottom ? 64 : 88 } : { left: 32, right: 32, bottom: 72 };
+    editor.setInsets({ top, left: pad.left, right: pad.right + extent.right, bottom: pad.bottom + extent.bottom }, animate);
+    document.body.style.setProperty("--inset-r", `${extent.right}px`);
+    document.body.style.setProperty("--inset-b", `${extent.bottom}px`);
+  };
+  const panel = mountCode($("code"), {
+    readOnly: !engine.reload,
+    onEdit: (text) => void engine.reload?.(text),
+    onLayout: layout,
+    onToggle: (open) => {
+      $("code-toggle").setAttribute("aria-pressed", String(open));
+      $("code-toggle").dataset["tip"] = open ? "Hide the D2 code" : "Show the D2 code";
+    },
+  });
+  $("code-toggle").onclick = () => panel.toggle();
+  $("code-toggle").setAttribute("aria-pressed", String(panel.open));
+  editor = mount($("editor"), engine, { onEdit: dismissHint });
   window.editor = editor;
-  wireStatus(editor);
-  wireControls(editor);
+  phone.addEventListener("change", () => layout(false));
+  layout(false);
+  wireCanvas(editor, { panel, toasts });
   if (info) {
-    document.querySelectorAll(".site-only").forEach((n) => ((n as HTMLElement).hidden = true));
-    $("filename").hidden = false;
-    $("filename").textContent = info.file;
+    $("tagline").hidden = true;
+    const name = document.createElement("span");
+    name.id = "filename";
+    name.className = "filename";
+    name.textContent = info.file;
+    name.title = info.file;
+    $("tagline").after(name);
+    for (const node of document.querySelectorAll<HTMLElement>(".site-only")) node.hidden = true;
+    await firstView(editor);
+    showHint();
     hideLoading();
     return;
   }
-  wireSiteControls(engine, editor, hint);
   const shared = await decodeShare(location.hash);
-  const first: Example = EXAMPLES[0]!;
-  if (shared) {
-    $<HTMLSelectElement>("example").add(new Option("Shared diagram", "shared"));
-    $<HTMLSelectElement>("example").value = "shared";
-    hint.current = DEFAULT_HINT;
-  } else {
-    hint.current = first.hint;
-  }
+  wireSite(engine, editor, toasts, { custom: shared !== null });
   showLoading("Laying out the diagram…", null);
-  await engine.open?.(shared ?? first.source);
+  await engine.open?.(shared ?? EXAMPLES[0]!.source);
+  showHint();
   hideLoading();
 }
