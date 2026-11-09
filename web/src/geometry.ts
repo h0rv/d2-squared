@@ -16,6 +16,13 @@ export const editId = (e: Edit): string => `${e.kind}|${e.key}|${e.end ?? ""}|${
 export const contains = (s: Shape, p: Point, margin = 0): boolean =>
   p.x >= s.x - margin && p.x <= s.x + s.width + margin && p.y >= s.y - margin && p.y <= s.y + s.height + margin;
 
+export const landsIn = (landing: Shape, target: Shape | undefined): boolean =>
+  !target ||
+  (landing.x >= target.x &&
+    landing.y >= target.y &&
+    landing.x + landing.width <= target.x + target.width &&
+    landing.y + landing.height <= target.y + target.height);
+
 export const rectDist = (s: Shape, p: Point): number =>
   Math.hypot(Math.max(s.x - p.x, p.x - (s.x + s.width), 0), Math.max(s.y - p.y, p.y - (s.y + s.height), 0));
 

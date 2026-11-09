@@ -94,7 +94,7 @@ func talaLayout(seeds []int64) layoutFn {
 		if err := d2talalayout.Layout(ctx, g, &o); err != nil {
 			return err
 		}
-		return squareUp(ctx, g)
+		return routeAll(ctx, g)
 	}
 }
 
@@ -107,7 +107,10 @@ func skewed(route []*geo.Point) bool {
 	return false
 }
 
-func squareUp(ctx context.Context, g *d2graph.Graph) error {
+func routeAll(ctx context.Context, g *d2graph.Graph) error {
+	if err := d2talalayout.RouteEdges(ctx, g, g.Edges); err != nil {
+		return err
+	}
 	var bad []*d2graph.Edge
 	for _, e := range g.Edges {
 		if !e.IsCurve && skewed(e.Route) {
@@ -117,7 +120,34 @@ func squareUp(ctx context.Context, g *d2graph.Graph) error {
 	if len(bad) == 0 {
 		return nil
 	}
-	return d2talalayout.RouteEdges(ctx, g, bad)
+	if err := d2talalayout.RouteEdges(ctx, g, bad); err != nil {
+		return err
+	}
+	for _, e := range bad {
+		if skewed(e.Route) && len(e.Route) == 2 {
+			e.Route = elbow(e)
+		}
+	}
+	return nil
+}
+
+func sideways(p *geo.Point, b *geo.Box) bool {
+	return math.Abs(p.X-b.TopLeft.X) < 1 || math.Abs(p.X-b.TopLeft.X-b.Width) < 1
+}
+
+func elbow(e *d2graph.Edge) []*geo.Point {
+	a, b := e.Route[0], e.Route[1]
+	switch out, in := sideways(a, e.Src.Box), sideways(b, e.Dst.Box); {
+	case out && in:
+		mid := (a.X + b.X) / 2
+		return []*geo.Point{a, geo.NewPoint(mid, a.Y), geo.NewPoint(mid, b.Y), b}
+	case out:
+		return []*geo.Point{a, geo.NewPoint(b.X, a.Y), b}
+	case in:
+		return []*geo.Point{a, geo.NewPoint(a.X, b.Y), b}
+	}
+	mid := (a.Y + b.Y) / 2
+	return []*geo.Point{a, geo.NewPoint(a.X, mid), geo.NewPoint(b.X, mid), b}
 }
 
 func compileSource(ctx context.Context, source string, cfg Config, layout layoutFn, themeID int64, darkThemeID *int64) (*d2target.Diagram, *d2graph.Graph, *d2svg.RenderOpts, error) {
@@ -309,11 +339,7 @@ func (l *Layout) reroute(moved string, dx, dy float64) ([]Path, error) {
 	return paths, nil
 }
 
-func sameColumn(a, b *int) bool {
-	return (a == nil) == (b == nil) && (a == nil || *a == *b)
-}
-
-func routeOnly(base *Layout, moved string, dx, dy float64) layoutFn {
+func copyGeometry(base *Layout, moved string, dx, dy float64) layoutFn {
 	return func(ctx context.Context, g *d2graph.Graph) error {
 		base.mu.Lock()
 		defer base.mu.Unlock()
@@ -333,29 +359,6 @@ func routeOnly(base *Layout, moved string, dx, dy float64) layoutFn {
 			obj.Box = geo.NewBox(tl, b.Width, b.Height)
 			obj.LabelPosition, obj.IconPosition = b.LabelPosition, b.IconPosition
 		}
-		edges := map[string]*d2graph.Edge{}
-		for _, e := range base.graph.Edges {
-			edges[e.AbsID()] = e
-		}
-		var fresh []*d2graph.Edge
-		for _, e := range g.Edges {
-			b, ok := edges[e.AbsID()]
-			if !ok || b.Src.AbsID() != e.Src.AbsID() || b.Dst.AbsID() != e.Dst.AbsID() ||
-				!sameColumn(b.SrcTableColumnIndex, e.SrcTableColumnIndex) || !sameColumn(b.DstTableColumnIndex, e.DstTableColumnIndex) ||
-				(moved != "" && (within(e.Src.AbsID(), moved) != within(e.Dst.AbsID(), moved))) {
-				fresh = append(fresh, e)
-				continue
-			}
-			e.Route, e.IsCurve = b.Route, b.IsCurve
-			e.LabelPosition, e.LabelPercentage = b.LabelPosition, b.LabelPercentage
-			if moved != "" && within(e.Src.AbsID(), moved) {
-				shifted := make([]*geo.Point, len(e.Route))
-				for i, p := range e.Route {
-					shifted[i] = geo.NewPoint(p.X+dx, p.Y+dy)
-				}
-				e.Route = shifted
-			}
-		}
-		return d2talalayout.RouteEdges(ctx, g, fresh)
+		return routeAll(ctx, g)
 	}
 }

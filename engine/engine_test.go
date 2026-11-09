@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -690,16 +691,53 @@ func skewedRoutes(l *Layout) []string {
 	return bad
 }
 
-func TestRoutesStayOrthogonalAfterHugging(t *testing.T) {
-	h := newHarness(t, "../examples/architecture.d2")
-	v := h.mustCommit(Edit{Kind: "move", Key: "services.billing", To: "data"})
-	if bad := skewedRoutes(v.Layout); len(bad) != 0 {
-		t.Fatalf("diagonal arrows after the move: %v", bad)
-	}
-	files, _ := filepath.Glob("../examples/*.d2")
-	for _, f := range files {
-		if bad := skewedRoutes(newHarness(t, f).view().Layout); len(bad) != 0 {
-			t.Fatalf("%s has diagonal arrows: %v", f, bad)
+func randomEdit(rng *rand.Rand, l *Layout) (Edit, bool) {
+	s := l.Shapes[rng.Intn(len(l.Shapes))]
+	switch rng.Intn(4) {
+	case 0:
+		return Edit{Kind: "pin", Key: s.ID, Left: s.X + rng.Intn(300) - 150, Top: s.Y + rng.Intn(200) - 100}, true
+	case 1:
+		var groups []string
+		for _, g := range l.Shapes {
+			if l.isContainer(g.ID) && !within(g.ID, s.ID) && g.ID != parentID(s.ID) {
+				groups = append(groups, g.ID)
+			}
 		}
+		if len(groups) == 0 {
+			return Edit{}, false
+		}
+		return Edit{Kind: "move", Key: s.ID, To: groups[rng.Intn(len(groups))]}, true
+	case 2:
+		if l.isContainer(s.ID) {
+			return Edit{Kind: "tidy", Key: s.ID}, true
+		}
+		return Edit{Kind: "resize", Key: s.ID, Left: s.X, Top: s.Y, Width: s.Width + 60, Height: s.Height + 20}, true
+	}
+	return Edit{Kind: "move", Key: s.ID}, parentID(s.ID) != ""
+}
+
+func TestRoutesStayOrthogonalAfterEdits(t *testing.T) {
+	files, _ := filepath.Glob("../examples/*.d2")
+	for _, f := range append(files, "testdata/arch.d2") {
+		t.Run(filepath.Base(f), func(t *testing.T) {
+			h := newHarness(t, f)
+			if bad := skewedRoutes(h.view().Layout); len(bad) != 0 {
+				t.Fatalf("diagonal arrows on open: %v", bad)
+			}
+			rng := rand.New(rand.NewSource(7))
+			for step := 0; step < 14; step++ {
+				e, ok := randomEdit(rng, h.view().Layout)
+				if !ok {
+					continue
+				}
+				v, err := h.commit(e)
+				if err != nil {
+					continue
+				}
+				if bad := skewedRoutes(v.Layout); len(bad) != 0 {
+					t.Fatalf("diagonal arrows after %+v: %v", e, bad)
+				}
+			}
+		})
 	}
 }

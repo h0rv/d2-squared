@@ -56,3 +56,19 @@ export function mountToasts(el: HTMLElement): Toasts {
     hide,
   };
 }
+
+export function showTip(tip: HTMLElement, text: string, at: { clientX: number; clientY: number }, touch = false): void {
+  if (!text) {
+    tip.hidden = true;
+    return;
+  }
+  if (tip.textContent !== text) tip.textContent = text;
+  tip.hidden = false;
+  const w = tip.offsetWidth;
+  const h = tip.offsetHeight;
+  let x = at.clientX + 16;
+  let y = touch ? at.clientY - h - 48 : at.clientY + 20;
+  if (x + w > window.innerWidth - 8) x = at.clientX - w - 16;
+  if (y + h > window.innerHeight - 8) y = at.clientY - h - 16;
+  tip.style.transform = `translate3d(${Math.max(8, x)}px, ${Math.max(8, y)}px, 0)`;
+}

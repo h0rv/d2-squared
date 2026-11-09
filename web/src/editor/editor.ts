@@ -1,6 +1,7 @@
 import type { Engine } from "../engine/engine";
-import { midpoint, nameOf, parentOf, pathD, within } from "../geometry";
+import { landsIn, midpoint, nameOf, parentOf, pathD, within } from "../geometry";
 import { svgEl } from "../svg";
+import { showTip } from "../ui/toast";
 import type { Candidate, Conn, Edit, Path, PendingChange, Point, Shape, Target, View } from "../types";
 import { createHits, type EndSlot } from "./hits";
 import { mountScene, type Piece } from "./scene";
@@ -493,7 +494,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     r.rect = { x, y, w, h };
     over.replaceChildren();
     svgEl("rect", { x, y, width: w, height: h, rx: 6, class: "resize-box" }, over);
-    showTip(`${w} × ${h}`, ev, isTouch(r.pointer));
+    showTip(tip, `${w} × ${h}`, ev, isTouch(r.pointer));
   }
 
   async function finishResize(cancelled: boolean): Promise<void> {
@@ -582,17 +583,10 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       d.overlay = key;
       over.replaceChildren();
       if (z && z.kind === "move") {
-        const target = z.to ? shapes.get(z.to) : null;
+        const target = z.to ? shapes.get(z.to) : undefined;
         if (target) svgEl("rect", { x: target.x, y: target.y, width: target.width, height: target.height, rx: 8, class: "target" }, over);
         const landing = d.cands.get(z.key)?.landing;
-        const inside =
-          !target ||
-          (landing &&
-            landing.x >= target.x &&
-            landing.y >= target.y &&
-            landing.x + landing.width <= target.x + target.width &&
-            landing.y + landing.height <= target.y + target.height);
-        if (landing && inside) {
+        if (landing && landsIn(landing, target)) {
           svgEl("rect", { x: landing.x, y: landing.y, width: landing.width, height: landing.height, rx: 6, class: "landing" }, over);
         }
       }
@@ -613,23 +607,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     svgEl("circle", { cx: d.ptr.x, cy: d.ptr.y, r: 7 * px, class: "end-dot on" }, over);
   }
 
-  function showTip(text: string, at: { clientX: number; clientY: number }, touch: boolean): void {
-    if (!text) {
-      tip.hidden = true;
-      return;
-    }
-    if (tip.textContent !== text) tip.textContent = text;
-    tip.hidden = false;
-    const w = tip.offsetWidth;
-    const h = tip.offsetHeight;
-    let x = at.clientX + 16;
-    let y = touch ? at.clientY - h - 48 : at.clientY + 20;
-    if (x + w > window.innerWidth - 8) x = at.clientX - w - 16;
-    if (y + h > window.innerHeight - 8) y = at.clientY - h - 16;
-    tip.style.transform = `translate3d(${Math.max(8, x)}px, ${Math.max(8, y)}px, 0)`;
-  }
-
-  const renderTip = (d: Drag): void => showTip(tipText(d), d.client, isTouch(d.pointer));
+  const renderTip = (d: Drag): void => showTip(tip, tipText(d), d.client, isTouch(d.pointer));
 
   function publishPending(d: Drag): void {
     const model = pendingChange(d);

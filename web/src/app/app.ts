@@ -200,18 +200,22 @@ function wireMenu(): void {
 }
 
 const HINT_TEXT = "Drag a box into another group, or drag an arrow's end onto another box";
+const HINT_SHORT = "Drag a box into a group";
 const HINT_LIMITED = "Placing boxes needs the TALA layout engine. You can still move boxes into groups and reconnect arrows.";
 
 const hintState = { armed: false, limited: false };
+const narrow = window.matchMedia(PHONE);
 
 function paintHint(): void {
   const hint = $("hint");
   const wanted = hintState.armed && (hintState.limited || store.get(HINT_KEY) !== "1");
-  hint.textContent = hintState.limited ? HINT_LIMITED : HINT_TEXT;
+  hint.textContent = hintState.limited ? HINT_LIMITED : narrow.matches ? HINT_SHORT : HINT_TEXT;
   hint.hidden = !wanted;
   hint.classList.toggle("gone", !wanted);
   document.body.classList.toggle("hint-on", wanted);
 }
+
+narrow.addEventListener("change", paintHint);
 
 function dismissHint(): void {
   if (hintState.limited) return;

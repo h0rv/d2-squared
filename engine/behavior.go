@@ -269,7 +269,7 @@ func (reconnect) Build(ctx context.Context, base *Layout, source string, e Edit)
 		if pinned, err = pinSource(clean, allIDs(base), base.shapeMap()); err != nil {
 			return nil, err
 		}
-		run = fixedLayout(routeOnly(base, "", 0, 0))
+		run = fixedLayout(copyGeometry(base, "", 0, 0))
 	}
 	layout, err := layoutWith(ctx, pinned, run)
 	if err != nil {
@@ -324,7 +324,7 @@ func (pin) Build(ctx context.Context, base *Layout, source string, e Edit) (*Can
 	if err != nil {
 		return nil, err
 	}
-	run := fixedLayout(routeOnly(base, e.Key, float64(dx), float64(dy)))
+	run := fixedLayout(copyGeometry(base, e.Key, float64(dx), float64(dy)))
 	if parentID(e.Key) != "" {
 		run = engineLayout(previewSeeds)
 	}
