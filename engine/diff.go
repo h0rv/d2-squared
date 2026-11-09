@@ -78,7 +78,7 @@ func diffLines(oldSrc, newSrc string, context int) []DiffLine {
 			keep[k] = true
 		}
 	}
-	var out []DiffLine
+	out := []DiffLine{}
 	skipped := false
 	for i, e := range edits {
 		if !keep[i] {
@@ -102,7 +102,7 @@ func diffLines(oldSrc, newSrc string, context int) []DiffLine {
 }
 
 func addedLines(oldSrc, newSrc string) []int {
-	var lines []int
+	lines := []int{}
 	for _, e := range lineEdits(splitLines(oldSrc), splitLines(newSrc)) {
 		if e.op == '+' {
 			lines = append(lines, e.b+1)

@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -349,16 +351,132 @@ func TestSizedKeepsUserSizes(t *testing.T) {
 	}
 }
 
-func TestStableSVGHash(t *testing.T) {
+func sceneText(l *Layout) string {
+	var b strings.Builder
+	b.WriteString(l.Scene.CSS + l.Scene.Defs)
+	for _, p := range l.Scene.Shapes {
+		b.WriteString(p.SVG)
+	}
+	for _, p := range l.Scene.Conns {
+		b.WriteString(p.SVG)
+	}
+	return b.String()
+}
+
+func TestSceneIsSplitAndStable(t *testing.T) {
 	h := newHarness(t, "testdata/arch.d2")
-	svg := h.view().SVG
-	if !strings.Contains(svg, stableHash) {
-		t.Fatal("svg should carry the stable hash")
+	l := h.view().Layout
+	text := sceneText(l)
+	if !strings.Contains(text, stableHash) {
+		t.Fatal("the scene should carry the stable hash")
+	}
+	if len(l.Scene.Shapes) != len(l.Shapes) || len(l.Scene.Conns) != len(l.Conns) {
+		t.Fatalf("every shape and connection needs a piece: %d/%d shapes, %d/%d connections",
+			len(l.Scene.Shapes), len(l.Shapes), len(l.Scene.Conns), len(l.Conns))
+	}
+	if strings.Contains(text, `mask="url(#`+stableHash+`)"`) || strings.Contains(l.Scene.Defs, "<mask") {
+		t.Fatal("the shared mask should be gone")
+	}
+	if strings.Count(l.Scene.Defs, "<marker") == 0 || strings.Contains(connText(l), "<marker") {
+		t.Fatal("markers should be hoisted into the shared defs")
+	}
+	if !strings.Contains(connText(l), `<g class="label">`) {
+		t.Fatal("a labelled connection should keep its label in its own group")
 	}
 	h2 := newHarness(t, "testdata/arch.d2")
-	if h2.view().SVG != svg {
-		t.Fatal("the same source should render the same svg")
+	if sceneText(h2.view().Layout) != text {
+		t.Fatal("the same source should render the same scene")
 	}
+}
+
+func connText(l *Layout) string {
+	var b strings.Builder
+	for _, p := range l.Scene.Conns {
+		b.WriteString(p.SVG)
+	}
+	return b.String()
+}
+
+func TestSceneCoversEveryExample(t *testing.T) {
+	files, _ := filepath.Glob("../examples/*.d2")
+	more, _ := filepath.Glob("testdata/*.d2")
+	for _, f := range append(files, more...) {
+		h := newHarness(t, f)
+		l := h.view().Layout
+		if len(l.Scene.Shapes) != len(l.Shapes) || len(l.Scene.Conns) != len(l.Conns) {
+			t.Fatalf("%s: pieces do not match the diagram", f)
+		}
+	}
+}
+
+func hasNull(t *testing.T, name string, v any) {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree any
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		t.Fatal(err)
+	}
+	var walk func(path string, n any)
+	walk = func(path string, n any) {
+		switch n := n.(type) {
+		case nil:
+			t.Errorf("%s: null at %s", name, path)
+		case map[string]any:
+			for k, c := range n {
+				walk(path+"."+k, c)
+			}
+		case []any:
+			for i, c := range n {
+				walk(fmt.Sprintf("%s[%d]", path, i), c)
+			}
+		}
+	}
+	walk("", tree)
+}
+
+func TestNoNullListsInTheAPI(t *testing.T) {
+	h := newHarness(t, "testdata/arch.d2")
+	v := h.view()
+	hasNull(t, "view", v)
+	edgeEnd, err := h.session.Route(Target{Kind: "edgeEnd", Edge: h.view().Conns[0].ID, End: "dst"}, Point{X: 10, Y: 10}, v.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasNull(t, "arrow-end route", map[string]any{"paths": edgeEnd})
+	lonely, err := h.session.Route(Target{Kind: "node", ID: "idp"}, Point{X: 0.1, Y: 0}, v.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasNull(t, "node route", map[string]any{"paths": lonely})
+	for _, id := range []string{"idp", "services.billing", "edge"} {
+		moved, err := h.session.Route(Target{Kind: "node", ID: id}, Point{X: 30, Y: 30}, v.Version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hasNull(t, "route "+id, map[string]any{"paths": moved})
+	}
+	edits, err := h.session.Plan(Target{Kind: "node", ID: "services.billing"}, Point{X: 600, Y: 1200}, v.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasNull(t, "plan", edits)
+	ch, err := h.session.Preview(h.ctx(), Target{Kind: "node", ID: "services.billing"}, Point{X: 600, Y: 1200}, v.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for c := range ch {
+		seen++
+		hasNull(t, "candidate "+c.Key, c)
+	}
+	if seen == 0 {
+		t.Fatal("expected preview candidates")
+	}
+	hasNull(t, "committed view", h.mustCommit(Edit{Kind: "pin", Key: "idp", Left: 5, Top: 5}))
+	hasNull(t, "undone view", func() View { u, _ := h.session.Undo(); return u }())
 }
 
 func TestDiffLines(t *testing.T) {

@@ -92,7 +92,7 @@ func (s *Session) publish(v View, cause string, started time.Time) View {
 	v.Cause = cause
 	v.Changed = addedLines(s.view.Source, v.Source)
 	if cause == "open" {
-		v.Changed = nil
+		v.Changed = []int{}
 	}
 	v.MS = float64(time.Since(started).Microseconds()) / 1000
 	v.CanUndo = len(s.undo) > 0
@@ -249,7 +249,7 @@ func (s *Session) Plan(t Target, p Point, version int64) ([]Edit, error) {
 	if version != 0 && version != v.Version {
 		return nil, ErrStale
 	}
-	var edits []Edit
+	edits := []Edit{}
 	for _, b := range behaviorOrder {
 		if hasTarget(b, v.Layout, t) {
 			edits = append(edits, b.Candidates(v.Layout, t, p)...)
@@ -300,7 +300,7 @@ func (s *Session) Route(t Target, delta Point, version int64) ([]Path, error) {
 		return nil, ErrStale
 	}
 	if t.Kind != "node" {
-		return nil, nil
+		return []Path{}, nil
 	}
 	return v.Layout.reroute(t.ID, delta.X, delta.Y)
 }

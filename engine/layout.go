@@ -39,11 +39,9 @@ type Conn struct {
 }
 
 type Layout struct {
-	SVG      string  `json:"svg"`
+	Scene    Scene   `json:"scene"`
 	Shapes   []Shape `json:"shapes"`
 	Conns    []Conn  `json:"conns"`
-	OriginX  int     `json:"originX"`
-	OriginY  int     `json:"originY"`
 	LayoutMS float64 `json:"layoutMs"`
 
 	graph *d2graph.Graph
@@ -105,7 +103,7 @@ func layoutWith(ctx context.Context, source string, layout layoutFn) (*Layout, e
 			pinned[obj.AbsID()] = true
 		}
 	}
-	l := &Layout{SVG: string(svg), Shapes: []Shape{}, Conns: []Conn{}, graph: g, mu: &sync.Mutex{}}
+	l := &Layout{Shapes: []Shape{}, Conns: []Conn{}, graph: g, mu: &sync.Mutex{}}
 	for _, sh := range diagram.Shapes {
 		s := Shape{ID: sh.ID, Type: sh.Type, X: sh.Pos.X, Y: sh.Pos.Y, Width: sh.Width, Height: sh.Height,
 			Pinned: pinned[sh.ID], PK: -1}
@@ -122,14 +120,20 @@ func layoutWith(ctx context.Context, source string, layout layoutFn) (*Layout, e
 		l.Shapes = append(l.Shapes, s)
 	}
 	for _, c := range diagram.Connections {
-		conn := Conn{ID: c.ID, Src: c.Src, Dst: c.Dst}
+		conn := Conn{ID: c.ID, Src: c.Src, Dst: c.Dst, Route: [][2]float64{}}
 		for _, p := range c.Route {
 			conn.Route = append(conn.Route, [2]float64{p.X, p.Y})
 		}
 		l.Conns = append(l.Conns, conn)
 	}
-	tl, _ := diagram.BoundingBox()
-	l.OriginX, l.OriginY = tl.X-pad, tl.Y-pad
+	shapeIDs, connIDs := map[string]bool{}, map[string]bool{}
+	for _, s := range l.Shapes {
+		shapeIDs[s.ID] = true
+	}
+	for _, c := range l.Conns {
+		connIDs[c.ID] = true
+	}
+	l.Scene = splitScene(string(svg), shapeIDs, connIDs)
 	l.LayoutMS = float64(time.Since(started).Microseconds()) / 1000
 	return l, nil
 }
@@ -222,14 +226,14 @@ func (l *Layout) reroute(moved string, dx, dy float64) ([]Path, error) {
 		}
 	}
 	if len(edges) == 0 {
-		return nil, nil
+		return []Path{}, nil
 	}
 	if err := d2talalayout.RouteEdges(d2log.WithDefault(context.Background()), l.graph, edges); err != nil {
 		return nil, err
 	}
 	paths := make([]Path, 0, len(edges))
 	for _, e := range edges {
-		p := Path{ID: e.AbsID(), Src: e.Src.AbsID(), Dst: e.Dst.AbsID()}
+		p := Path{ID: e.AbsID(), Src: e.Src.AbsID(), Dst: e.Dst.AbsID(), Route: [][2]float64{}}
 		for _, pt := range e.Route {
 			p.Route = append(p.Route, [2]float64{pt.X, pt.Y})
 		}

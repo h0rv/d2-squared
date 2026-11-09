@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/d2lang/d2 v0.9.0
 	github.com/d2lang/util-go v0.2.0
+	golang.org/x/net v0.57.0
 )
 
 require (
@@ -22,7 +23,6 @@ require (
 	github.com/yuin/goldmark v1.8.5 // indirect
 	golang.org/x/exp v0.0.0-20260727155853-b88d891fe743 // indirect
 	golang.org/x/image v0.45.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
