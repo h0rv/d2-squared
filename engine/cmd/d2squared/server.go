@@ -232,6 +232,25 @@ func (s *server) verify(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, d)
 }
 
+func (s *server) text(w http.ResponseWriter, r *http.Request) {
+	res, err := s.session.Text(r.Context(), r.URL.Query().Get("charset") != "ascii")
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, res)
+}
+
+func (s *server) exportSVG(w http.ResponseWriter, r *http.Request) {
+	svg, err := s.session.ExportSVG(r.Context(), r.URL.Query().Get("dark") != "")
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	_, _ = w.Write(svg)
+}
+
 func (s *server) routes(ui fs.FS) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(ui))
@@ -244,5 +263,7 @@ func (s *server) routes(ui fs.FS) *http.ServeMux {
 	mux.HandleFunc("POST /api/undo", s.history(false))
 	mux.HandleFunc("POST /api/redo", s.history(true))
 	mux.HandleFunc("GET /api/verify", s.verify)
+	mux.HandleFunc("GET /api/text", s.text)
+	mux.HandleFunc("GET /api/export/svg", s.exportSVG)
 	return mux
 }

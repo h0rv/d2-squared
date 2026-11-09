@@ -14,6 +14,8 @@ interface D2SquaredApi {
   undo(): Promise<string>;
   redo(): Promise<string>;
   verify(): Promise<string>;
+  text(unicode: boolean): Promise<string>;
+  exportSvg(dark: boolean): Promise<string>;
 }
 
 declare var d2squared: D2SquaredApi;

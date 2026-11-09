@@ -5,8 +5,10 @@ import { mount, type Editor } from "../editor/editor";
 import { mountCode, type CodePanel } from "../ui/code";
 import { ICONS, type IconName } from "../ui/icons";
 import { store } from "../ui/store";
+import { mountTextView, type TextView } from "../ui/textview";
 import { mountToasts, type Toasts } from "../ui/toast";
 import { EXAMPLES } from "./examples";
+import { exportAs, type ExportKind } from "./export";
 import { LocalFile } from "./files";
 import { decodeShare, encodeShare } from "./share";
 
@@ -72,14 +74,43 @@ function paintIcons(): void {
 interface Chrome {
   panel: CodePanel;
   toasts: Toasts;
+  textView: TextView;
+}
+
+function wireViewToggle(text: TextView, editor: Editor): void {
+  const diagram = $("view-diagram");
+  const words = $("view-text");
+  const choose = (showText: boolean): void => {
+    text.setActive(showText);
+    diagram.setAttribute("aria-checked", String(!showText));
+    words.setAttribute("aria-checked", String(showText));
+    if (!showText) window.requestAnimationFrame(() => editor.fit());
+  };
+  diagram.onclick = () => choose(false);
+  words.onclick = () => choose(true);
+}
+
+function wireExport(engine: Engine, toasts: Toasts, name: () => string): void {
+  for (const button of document.querySelectorAll<HTMLElement>("[data-export]")) {
+    button.onclick = async () => {
+      closeMenu();
+      toasts.busy("Preparing the file…");
+      try {
+        toasts.show(await exportAs(button.dataset["export"] as ExportKind, engine, name()));
+      } catch (err) {
+        toasts.show(err instanceof Error ? err.message : "The file could not be exported.", { error: true, ms: 6000 });
+      }
+    };
+  }
 }
 
 function wireCanvas(editor: Editor, chrome: Chrome): void {
-  const { panel, toasts } = chrome;
+  const { panel, toasts, textView } = chrome;
   const undo = $<HTMLButtonElement>("undo");
   const redo = $<HTMLButtonElement>("redo");
   editor.on("view", (v) => {
     panel.setSource(v);
+    textView.refresh();
     undo.disabled = !v.canUndo;
     redo.disabled = !v.canRedo;
   });
@@ -292,7 +323,10 @@ export async function start(): Promise<void> {
   window.editor = editor;
   phone.addEventListener("change", () => layout(false));
   layout(false);
-  wireCanvas(editor, { panel, toasts });
+  const text = mountTextView($("text-view"), engine, toasts);
+  wireCanvas(editor, { panel, toasts, textView: text });
+  wireViewToggle(text, editor);
+  wireExport(engine, toasts, () => (info ? info.file.replace(/\.[^.]+$/, "") : "diagram"));
   if (info) {
     $("tagline").hidden = true;
     const name = document.createElement("span");

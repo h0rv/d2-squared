@@ -133,6 +133,19 @@ func verify(js.Value, []js.Value) any {
 	return promise(func() (any, error) { return session.Verify(context.Background()) })
 }
 
+func text(_ js.Value, args []js.Value) any {
+	unicode := args[0].Bool()
+	return promise(func() (any, error) { return session.Text(context.Background(), unicode) })
+}
+
+func exportSVG(_ js.Value, args []js.Value) any {
+	dark := args[0].Bool()
+	return promise(func() (any, error) {
+		svg, err := session.ExportSVG(context.Background(), dark)
+		return string(svg), err
+	})
+}
+
 func main() {
 	api := js.Global().Get("Object").New()
 	api.Set("open", js.FuncOf(open))
@@ -145,6 +158,8 @@ func main() {
 	api.Set("undo", history(session.Undo))
 	api.Set("redo", history(session.Redo))
 	api.Set("verify", js.FuncOf(verify))
+	api.Set("text", js.FuncOf(text))
+	api.Set("exportSvg", js.FuncOf(exportSVG))
 	js.Global().Set("d2squared", api)
 	if ready := js.Global().Get("d2squaredReady"); ready.Type() == js.TypeFunction {
 		ready.Invoke()

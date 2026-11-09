@@ -37,6 +37,11 @@
       <button id="undo" class="icon-btn" aria-label="Undo" data-tip="Undo" disabled></button>
       <button id="redo" class="icon-btn" aria-label="Redo" data-tip="Redo" disabled></button>
       <span class="sep"></span>
+      <div id="view-toggle" class="seg" role="radiogroup" aria-label="View">
+        <button id="view-diagram" class="seg-btn" role="radio" aria-checked="true">Diagram</button>
+        <button id="view-text" class="seg-btn" role="radio" aria-checked="false">Text</button>
+      </div>
+      <span class="sep"></span>
       <button id="code-toggle" class="btn" aria-pressed="false" aria-controls="code" aria-label="Code" data-tip="Show the D2 code"></button>
       <button id="more" class="icon-btn" aria-label="More" aria-haspopup="menu" aria-expanded="false" data-tip="More"></button>
     </div>
@@ -57,6 +62,15 @@
       </div>
       <button id="tidy" class="menu-item" role="menuitem" hidden>Tidy up</button>
       <button id="reset" class="menu-item" role="menuitem">Reset layout</button>
+      <hr />
+      <div class="menu-row" role="group" aria-label="Export">
+        <span>Export</span>
+        <div class="mini-seg words">
+          <button class="menu-item" role="menuitem" data-export="svg">SVG</button>
+          <button class="menu-item" role="menuitem" data-export="png">PNG</button>
+          <button class="menu-item" role="menuitem" data-export="text">Text</button>
+        </div>
+      </div>
     </div>
 
     <div id="hint" class="surface chip hint" hidden>Drag a box into another group, or drag an arrow's end onto another box</div>
@@ -67,6 +81,21 @@
       <button id="zoom-in" class="icon-btn" aria-label="Zoom in" data-tip="Zoom in"></button>
       <button id="fit" class="icon-btn" aria-label="Fit to screen" data-tip="Fit to screen"></button>
     </div>
+
+    <section id="text-view" class="surface text-view" aria-label="The diagram as text" hidden>
+      <header class="text-head">
+        <div id="text-charset" class="seg" role="radiogroup" aria-label="Characters">
+          <button id="text-unicode" class="seg-btn" role="radio" aria-checked="true">Unicode</button>
+          <button id="text-ascii" class="seg-btn" role="radio" aria-checked="false">ASCII</button>
+        </div>
+        <span id="text-note" class="muted"></span>
+        <span class="grow"></span>
+        <button id="text-copy" class="btn">Copy</button>
+      </header>
+      <div id="text-scroll" class="text-scroll">
+        <pre id="text-out" class="text-out" tabindex="0"></pre>
+      </div>
+    </section>
 
     <div id="toast" class="surface toast" role="status" aria-live="polite" hidden></div>
 

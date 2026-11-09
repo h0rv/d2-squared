@@ -75,6 +75,12 @@ export interface Config {
   darkThemeId: number;
 }
 
+export interface TextResult {
+  version: number;
+  text: string;
+  note: string;
+}
+
 export interface View {
   version: number;
   source: string;

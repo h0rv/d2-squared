@@ -1,4 +1,4 @@
-import type { Candidate, Edit, Point, PreviewMessage, RouteResult, Target, View } from "../types";
+import type { Candidate, Edit, Point, PreviewMessage, RouteResult, Target, TextResult, View } from "../types";
 import { editId } from "../geometry";
 import { AsyncQueue } from "./async-queue";
 import { EngineError, type Engine } from "./engine";
@@ -201,5 +201,13 @@ export class WasmEngine implements Engine {
 
   async redo(): Promise<View> {
     return this.adopt(await this.primary.call<View>("redo"));
+  }
+
+  text(unicode: boolean): Promise<TextResult> {
+    return this.primary.call<TextResult>("text", unicode);
+  }
+
+  exportSvg(dark: boolean): Promise<string> {
+    return this.primary.call<string>("exportSvg", dark);
   }
 }

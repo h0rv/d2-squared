@@ -7,7 +7,7 @@ import { Diagram, expectClean, frameStats, sleep } from "./helpers";
 
 const engineDir = path.resolve(import.meta.dirname, "../../engine");
 const binary = path.resolve(import.meta.dirname, "../.build/d2squared");
-const PORT = 8803;
+const PORT = 8808;
 
 interface Served {
   file: string;
@@ -32,7 +32,11 @@ const test = base.extend<{ serve: (fixture: string) => Promise<Served> }>({
           await sleep(200);
         }
       }
-      return { file, url: `http://127.0.0.1:${PORT}/`, source: () => readFileSync(file, "utf8") };
+      return {
+        file,
+        url: `http://127.0.0.1:${PORT}/`,
+        source: () => readFileSync(file, "utf8"),
+      };
     });
     for (const child of children) {
       child.kill();
@@ -45,7 +49,10 @@ test.afterEach(expectClean);
 
 test.beforeAll(() => {
   mkdirSync(path.dirname(binary), { recursive: true });
-  execFileSync("go", ["build", "-o", binary, "./cmd/d2squared"], { cwd: engineDir, stdio: "inherit" });
+  execFileSync("go", ["build", "-o", binary, "./cmd/d2squared"], {
+    cwd: engineDir,
+    stdio: "inherit",
+  });
 });
 
 async function open(page: import("@playwright/test").Page, url: string): Promise<Diagram> {
@@ -64,7 +71,11 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
 
   await d.openCode();
   const data = await d.mustShape("data");
-  let live: { paths: string[]; labels: (string | null)[]; copies: number } | null = null;
+  let live: {
+    paths: string[];
+    labels: (string | null)[];
+    copies: number;
+  } | null = null;
   let r = await d.drag(await d.center("services.billing"), await d.at(data.x + 40, data.y + 80), {
     afterZones: async () => {
       live = await page.evaluate(() => ({
@@ -178,7 +189,10 @@ test("serve: large ERD pin, column reconnect, early drop and autoscroll", async 
   await d.setScale(0.35);
   await sleep(300);
   const team = await d.center("products");
-  const stageRect = await page.evaluate(() => ({ right: window.innerWidth, bottom: window.innerHeight }));
+  const stageRect = await page.evaluate(() => ({
+    right: window.innerWidth,
+    bottom: window.innerHeight,
+  }));
   const canvasAt = async () => {
     const p = await d.at(0, 0);
     return [p.x, p.y] as const;
@@ -195,7 +209,10 @@ test("serve: large ERD pin, column reconnect, early drop and autoscroll", async 
 for (const scheme of ["dark", "light"] as const) {
   test(`serve: colors and layer order after drops (${scheme})`, async ({ browser, serve }) => {
     const served = await serve("arch.d2");
-    const context = await browser.newContext({ colorScheme: scheme, viewport: { width: 1440, height: 900 } });
+    const context = await browser.newContext({
+      colorScheme: scheme,
+      viewport: { width: 1440, height: 900 },
+    });
     const page = await context.newPage();
     const d = await open(page, served.url);
     for (const dx of [-280, 200]) {
@@ -213,5 +230,65 @@ for (const scheme of ["dark", "light"] as const) {
     await page.screenshot({ path: `test-results/serve-${scheme}.png` });
     await d.noErrors();
     await context.close();
+  });
+}
+
+const centerGap = (page: import("@playwright/test").Page) =>
+  page.evaluate(() => {
+    const out = document.getElementById("text-out")!.getBoundingClientRect();
+    const box = document.getElementById("text-scroll")!.getBoundingClientRect();
+    return {
+      x: out.left + out.width / 2 - (box.left + box.width / 2),
+      y: out.top + out.height / 2 - (box.top + box.height / 2),
+    };
+  });
+
+test("serve: the text view shows the diagram, centers it and copies it", async ({ page, context, browserName, serve }) => {
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const served = await serve("sized.d2");
+  const d = await open(page, served.url);
+  await page.click("#view-text");
+  const out = page.locator("#text-out");
+  await expect(out).toContainText("Alpha");
+  await expect(out).toContainText("Gamma");
+  const gap = await centerGap(page);
+  expect(Math.abs(gap.x)).toBeLessThan(4);
+  expect(Math.abs(gap.y)).toBeLessThan(4);
+  await page.click("#text-copy");
+  await expect(page.locator("#toast")).toContainText("Copied");
+  if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("Alpha");
+  await d.noErrors();
+});
+
+const textSizes = {
+  desktop: { width: 1500, height: 950 },
+  phone: { width: 390, height: 780 },
+};
+
+for (const fixture of ["sized.d2", "arch.d2"]) {
+  test(`serve: text view screenshots (${fixture})`, async ({ browser, serve }) => {
+    mkdirSync("test-results/ux-v6", { recursive: true });
+    const served = await serve(fixture);
+    const name = fixture.replace(".d2", "");
+    for (const scheme of ["light", "dark"] as const) {
+      for (const [size, viewport] of Object.entries(textSizes)) {
+        const context = await browser.newContext({
+          colorScheme: scheme,
+          viewport,
+        });
+        const page = await context.newPage();
+        await open(page, served.url);
+        await page.click("#view-text");
+        await expect(page.locator("#text-out")).toContainText(fixture === "sized.d2" ? "Alpha" : "Postgres");
+        for (const charset of ["unicode", "ascii"]) {
+          await page.click(`#text-${charset}`);
+          await sleep(500);
+          await page.screenshot({
+            path: `test-results/ux-v6/${name}-${scheme}-${size}-${charset}.png`,
+          });
+        }
+        await context.close();
+      }
+    }
   });
 }

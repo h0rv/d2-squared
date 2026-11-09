@@ -1,4 +1,4 @@
-import type { Candidate, Edit, Point, PreviewMessage, RouteResult, Target, View } from "../types";
+import type { Candidate, Edit, Point, PreviewMessage, RouteResult, Target, TextResult, View } from "../types";
 import { EngineError, type Engine } from "./engine";
 
 export interface ServeInfo {
@@ -125,5 +125,15 @@ export class HttpEngine implements Engine {
     const view = await this.json<View>(await this.post("api/redo", {}));
     this.latest = Math.max(this.latest, view.version);
     return view;
+  }
+
+  async text(unicode: boolean): Promise<TextResult> {
+    return this.json(await fetch(`${this.base}api/text?charset=${unicode ? "unicode" : "ascii"}`));
+  }
+
+  async exportSvg(dark: boolean): Promise<string> {
+    const res = await fetch(`${this.base}api/export/svg${dark ? "?dark=1" : ""}`);
+    if (!res.ok) throw new EngineError(await res.text(), res.status);
+    return res.text();
   }
 }
