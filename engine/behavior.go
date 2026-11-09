@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 )
@@ -10,6 +11,7 @@ import (
 const (
 	maxMoveCandidates      = 32
 	maxReconnectCandidates = 12
+	minSide                = 24
 )
 
 var previewSeeds = []int64{1}
@@ -71,6 +73,8 @@ func init() {
 	Register(reconnect{}, "reconnect")
 	Register(pin{}, "pin")
 	Register(direction{}, "direction", "unpin")
+	Register(tidy{}, "tidy")
+	Register(resize{}, "resize")
 }
 
 func hasTarget(b Behavior, l *Layout, t Target) bool {
@@ -343,4 +347,95 @@ func (direction) Build(ctx context.Context, base *Layout, source string, e Edit)
 		return nil, err
 	}
 	return &Candidate{Label: label, Edit: e, Diff: diffLines(source, clean, 1), layout: layout, source: clean}, nil
+}
+
+type tidy struct{}
+
+func (tidy) Name() string { return "tidy" }
+
+func (tidy) Targets(*Layout) []Target { return nil }
+
+func (tidy) Candidates(*Layout, Target, Point) []Edit { return nil }
+
+func (tidy) Build(ctx context.Context, base *Layout, source string, e Edit) (*Candidate, error) {
+	if !base.isContainer(e.Key) {
+		return nil, fmt.Errorf("%s is not a group", e.Key)
+	}
+	g, err := compile(source)
+	if err != nil {
+		return nil, err
+	}
+	var inside, outside []string
+	for _, s := range base.Shapes {
+		if within(s.ID, e.Key) && s.ID != e.Key {
+			inside = append(inside, s.ID)
+		} else {
+			outside = append(outside, s.ID)
+		}
+	}
+	for _, id := range inside {
+		if g, err = unpinOne(g, id, base.userSized[id]); err != nil {
+			return nil, err
+		}
+	}
+	clean := format(g)
+	pinned, err := pinSource(clean, outside, base.shapeMap())
+	if err != nil {
+		return nil, err
+	}
+	layout, err := layoutWith(ctx, pinned, talaLayout(previewSeeds))
+	if err != nil {
+		return nil, err
+	}
+	if layout, err = markPinned(layout, pinned); err != nil {
+		return nil, err
+	}
+	landing, _ := layout.shape(e.Key)
+	return &Candidate{Label: "tidy " + e.Key, Edit: e, Landing: landing, Diff: diffLines(source, clean, 1),
+		PinLines: countAdded(clean, pinned), layout: layout, source: pinned, landID: e.Key}, nil
+}
+
+type resize struct{}
+
+func (resize) Name() string { return "resize" }
+
+func (resize) Targets(*Layout) []Target { return nil }
+
+func (resize) Candidates(*Layout, Target, Point) []Edit { return nil }
+
+func (resize) Build(ctx context.Context, base *Layout, source string, e Edit) (*Candidate, error) {
+	s, ok := base.shape(e.Key)
+	if !ok {
+		return nil, errUnknownShape(e.Key)
+	}
+	shapes := base.shapeMap()
+	s.X, s.Y, s.Width, s.Height = e.Left, e.Top, max(e.Width, minSide), max(e.Height, minSide)
+	shapes[e.Key] = s
+	pinned, err := pinSource(source, allIDs(base), shapes)
+	if err != nil {
+		return nil, err
+	}
+	g, err := compile(pinned)
+	if err != nil {
+		return nil, err
+	}
+	fields := [][2]string{{"width", strconv.Itoa(s.Width)}, {"height", strconv.Itoa(s.Height)}}
+	if obj := findObject(g, e.Key); obj != nil {
+		fields = slices.DeleteFunc(fields, func(f [2]string) bool { return scalarIs(obj, f[0], f[1]) })
+	}
+	if g, err = setFields(g, e.Key, fields); err != nil {
+		return nil, err
+	}
+	sized := format(g)
+	layout, err := layoutWith(ctx, sized, talaLayout(previewSeeds))
+	if err != nil {
+		return nil, err
+	}
+	if layout, err = markPinned(layout, sized); err != nil {
+		return nil, err
+	}
+	landing, _ := layout.shape(e.Key)
+	return &Candidate{Label: "resize " + e.Key, Edit: e, Landing: landing,
+		Diff:     []DiffLine{{Op: "+", Text: "width: " + strconv.Itoa(s.Width)}, {Op: "+", Text: "height: " + strconv.Itoa(s.Height)}},
+		PinLines: countAdded(source, sized), layout: layout, source: sized, landID: e.Key}, nil
 }

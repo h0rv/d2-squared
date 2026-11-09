@@ -616,6 +616,66 @@ func TestPreviewMatchesTheCommitWhenGroupsHug(t *testing.T) {
 	}
 }
 
+func TestTidyUpALayoutGroup(t *testing.T) {
+	h := newHarness(t, "testdata/arch.d2")
+	start := h.src
+	b := h.shapes()["services.billing"]
+	h.mustCommit(Edit{Kind: "pin", Key: "services.billing", Left: b.X + 200, Top: b.Y + 40})
+	pinned := h.src
+	outside := h.shapes()
+	v := h.mustCommit(Edit{Kind: "tidy", Key: "services"})
+	if got := directPins(t, h.src, "services"); len(got) != 0 {
+		t.Fatalf("tidy should drop the saved positions inside the group:\n%s", h.src)
+	}
+	for _, id := range []string{"idp", "data", "edge", "services"} {
+		s := v.Layout.shapeMap()[id]
+		if s.X != outside[id].X || s.Y != outside[id].Y {
+			t.Fatalf("%s moved: %+v -> %+v", id, outside[id], s)
+		}
+	}
+	h.noDrift()
+	u, err := h.session.Undo()
+	if err != nil || h.src != pinned || u.Source != pinned {
+		t.Fatalf("undo should restore the file: %v", err)
+	}
+	if h.src == start {
+		t.Fatal("the setup should have pinned something")
+	}
+}
+
+func TestResizeWritesWidthAndHeight(t *testing.T) {
+	h := newHarness(t, "testdata/arch.d2")
+	start := h.src
+	a := h.shapes()["services.auth"]
+	v := h.mustCommit(Edit{Kind: "resize", Key: "services.auth", Left: a.X, Top: a.Y, Width: a.Width + 70, Height: a.Height + 30})
+	got := v.Layout.shapeMap()["services.auth"]
+	if got.Width != a.Width+70 || got.Height != a.Height+30 {
+		t.Fatalf("auth is %dx%d, want %dx%d", got.Width, got.Height, a.Width+70, a.Height+30)
+	}
+	if !strings.Contains(h.src, fmt.Sprintf("width: %d", a.Width+70)) || !strings.Contains(h.src, fmt.Sprintf("height: %d", a.Height+30)) {
+		t.Fatalf("size not written:\n%s", h.src)
+	}
+	h.noDrift()
+	if _, err := h.session.Undo(); err != nil || h.src != start {
+		t.Fatalf("undo should restore the file: %v", err)
+	}
+}
+
+func TestResizedGroupsKeepTheirSize(t *testing.T) {
+	h := newHarness(t, "testdata/arch.d2")
+	s := h.shapes()["services"]
+	v := h.mustCommit(Edit{Kind: "resize", Key: "services", Left: s.X, Top: s.Y, Width: s.Width + 120, Height: s.Height + 80})
+	got := v.Layout.shapeMap()["services"]
+	if got.Width != s.Width+120 || got.Height != s.Height+80 {
+		t.Fatalf("services is %dx%d, want %dx%d:\n%s", got.Width, got.Height, s.Width+120, s.Height+80, h.src)
+	}
+	b := h.shapes()["services.billing"]
+	h.mustCommit(Edit{Kind: "pin", Key: "services.billing", Left: b.X + 30, Top: b.Y})
+	if again := h.shapes()["services"]; again.Width != got.Width || again.Height != got.Height {
+		t.Fatalf("a resized group should keep its size: %+v -> %+v", got, again)
+	}
+}
+
 func skewedRoutes(l *Layout) []string {
 	var bad []string
 	for _, c := range l.Conns {

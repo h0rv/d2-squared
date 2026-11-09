@@ -42,7 +42,11 @@ type Target struct {
 }
 
 func (e Edit) ID() string {
-	return fmt.Sprintf("%s|%s|%s|%s|%d,%d", e.Kind, e.Key, e.End, e.To, e.Left, e.Top)
+	id := fmt.Sprintf("%s|%s|%s|%s|%d,%d", e.Kind, e.Key, e.End, e.To, e.Left, e.Top)
+	if e.Kind == "resize" {
+		id += fmt.Sprintf("|%dx%d", e.Width, e.Height)
+	}
+	return id
 }
 
 func errUnknownShape(id string) error { return fmt.Errorf("unknown shape %s", id) }
@@ -275,7 +279,10 @@ func sizedIn(source string) map[string]bool {
 }
 
 func remapSized(sized map[string]bool, e Edit) map[string]bool {
-	out := make(map[string]bool, len(sized))
+	out := make(map[string]bool, len(sized)+1)
+	if e.Kind == "resize" {
+		out[e.Key] = true
+	}
 	for id, v := range sized {
 		if e.Kind == "move" && within(id, e.Key) {
 			id = movedID(e) + id[len(e.Key):]
