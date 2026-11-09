@@ -1,0 +1,42 @@
+vars: {d2-config: {layout-engine: tala}}
+
+edge: {
+  web: Web App
+  mobile: Mobile App
+  gateway: API Gateway
+}
+services: {
+  auth: Auth Service
+  users: User Service
+  billing: Billing Service
+  notifier: Notifier
+  core: {
+    orders: Order Service
+    inventory: Inventory Service
+    search: Search Service
+  }
+}
+data: {
+  pg: Postgres {shape: cylinder}
+  redis: Redis {shape: cylinder}
+  s3: Object Store {shape: cylinder}
+  queue: Event Bus {shape: queue}
+}
+idp: Identity Provider
+
+edge.web -> edge.gateway
+edge.mobile -> edge.gateway
+edge.gateway -> services.auth
+edge.gateway -> services.users
+edge.gateway -> services.core.orders
+services.auth -> idp
+services.auth -> data.redis
+services.users -> data.pg
+services.core.orders -> data.pg
+services.core.orders -> services.core.inventory
+services.core.orders -> data.queue
+services.core.inventory -> data.pg
+services.core.search -> data.s3
+services.billing -> data.pg
+data.queue -> services.notifier
+data.queue -> services.billing: events

@@ -1,0 +1,31 @@
+vars: {d2-config: {layout-engine: tala}}
+
+direction: right
+
+clients: Clients {
+  web: Web app
+  mobile: Mobile app
+}
+gateway: API gateway
+services: Services {
+  auth: Auth
+  orders: Orders
+  billing: Billing
+  notifier: Notifier
+}
+data: Data {
+  db: Postgres {shape: cylinder}
+  cache: Redis {shape: cylinder}
+  queue: Event bus {shape: queue}
+}
+
+clients.web -> gateway
+clients.mobile -> gateway
+gateway -> services.auth
+gateway -> services.orders
+services.auth -> data.cache
+services.orders -> data.db
+services.orders -> data.queue
+services.billing -> data.db
+data.queue -> services.notifier
+data.queue -> services.billing: events

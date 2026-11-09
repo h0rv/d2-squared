@@ -1,0 +1,19 @@
+vars: {d2-config: {layout-engine: tala}}
+
+direction: right
+
+placed: Placed
+paid: Paid
+packed: Packed
+shipped: Shipped
+delivered: Delivered
+cancelled: Cancelled
+refunded: Refunded
+
+placed -> paid: pay
+placed -> cancelled: cancel
+paid -> packed: pack
+paid -> refunded: refund
+packed -> shipped: ship
+shipped -> delivered: deliver
+delivered -> refunded: return

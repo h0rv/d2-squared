@@ -1,0 +1,7 @@
+node_modules/
+dist/
+web/public/d2squared.wasm
+web/.build/
+web/test-results/
+web/playwright-report/
+.DS_Store

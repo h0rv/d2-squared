@@ -1,0 +1,65 @@
+vars: {d2-config: {layout-engine: tala}}
+
+direction: right
+
+customers: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  name: varchar
+  email: varchar
+}
+addresses: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  customer_id: int
+  city: varchar
+}
+orders: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  customer_id: int
+  address_id: int
+  placed_at: timestamp
+}
+order_items: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  order_id: int
+  product_id: int
+  quantity: int
+}
+products: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  category_id: int
+  name: varchar
+  price: int
+}
+categories: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  name: varchar
+}
+payments: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  order_id: int
+  amount: int
+}
+reviews: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  product_id: int
+  customer_id: int
+  rating: int
+}
+
+addresses.customer_id -> customers.id
+orders.customer_id -> customers.id
+orders.address_id -> addresses.id
+order_items.order_id -> orders.id
+order_items.product_id -> products.id
+products.category_id -> categories.id
+payments.order_id -> orders.id
+reviews.product_id -> products.id
+reviews.customer_id -> customers.id

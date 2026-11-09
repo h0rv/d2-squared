@@ -1,0 +1,300 @@
+vars: {d2-config: {layout-engine: tala}}
+
+direction: right
+
+organizations: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  name: varchar
+  plan_id: int
+  created_at: timestamp
+}
+plans: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  name: varchar
+  price_cents: int
+  interval: varchar
+}
+subscriptions: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  organization_id: int
+  plan_id: int
+  status: varchar
+  renews_at: timestamp
+}
+users: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  email: varchar {constraint: unique}
+  name: varchar
+  created_at: timestamp
+}
+memberships: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  user_id: int
+  organization_id: int
+  role_id: int
+}
+roles: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  name: varchar
+}
+permissions: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  code: varchar {constraint: unique}
+  description: text
+}
+role_permissions: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  role_id: int
+  permission_id: int
+}
+api_keys: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  organization_id: int
+  label: varchar
+  last_used_at: timestamp
+}
+sessions: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  user_id: int
+  ip: varchar
+  expires_at: timestamp
+}
+customers: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  user_id: int
+  organization_id: int
+  phone: varchar
+}
+addresses: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  customer_id: int
+  line1: varchar
+  city: varchar
+  country: varchar
+}
+categories: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  name: varchar
+}
+products: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  supplier_id: int
+  name: varchar
+  description: text
+  active: bool
+}
+product_categories: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  product_id: int
+  category_id: int
+}
+variants: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  product_id: int
+  sku: varchar {constraint: unique}
+  price_cents: int
+}
+suppliers: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  name: varchar
+  contact_email: varchar
+}
+warehouses: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  name: varchar
+  address_id: int
+}
+inventory_items: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  variant_id: int
+  warehouse_id: int
+  quantity: int
+}
+carts: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  customer_id: int
+  created_at: timestamp
+}
+cart_items: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  cart_id: int
+  variant_id: int
+  quantity: int
+}
+orders: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  customer_id: int
+  shipping_address_id: int
+  status: varchar
+  total_cents: int
+  placed_at: timestamp
+}
+order_items: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  order_id: int
+  variant_id: int
+  quantity: int
+  unit_price_cents: int
+}
+coupons: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  code: varchar {constraint: unique}
+  percent_off: int
+  expires_at: timestamp
+}
+order_coupons: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  order_id: int
+  coupon_id: int
+}
+payments: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  order_id: int
+  amount_cents: int
+  method: varchar
+  paid_at: timestamp
+}
+refunds: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  payment_id: int
+  amount_cents: int
+  reason: text
+}
+shipments: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  order_id: int
+  warehouse_id: int
+  carrier: varchar
+  shipped_at: timestamp
+}
+shipment_items: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  shipment_id: int
+  order_item_id: int
+  quantity: int
+}
+invoices: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  order_id: int
+  organization_id: int
+  issued_at: timestamp
+}
+invoice_lines: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  invoice_id: int
+  description: varchar
+  amount_cents: int
+}
+reviews: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  product_id: int
+  customer_id: int
+  rating: int
+  body: text
+}
+wishlists: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  customer_id: int
+  name: varchar
+}
+wishlist_items: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  wishlist_id: int
+  product_id: int
+}
+notifications: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  user_id: int
+  kind: varchar
+  read_at: timestamp
+}
+audit_logs: {
+  shape: sql_table
+  id: int {constraint: primary_key}
+  user_id: int
+  organization_id: int
+  action: varchar
+  created_at: timestamp
+}
+
+organizations.plan_id -> plans.id
+subscriptions.organization_id -> organizations.id
+subscriptions.plan_id -> plans.id
+memberships.user_id -> users.id
+memberships.organization_id -> organizations.id
+memberships.role_id -> roles.id
+role_permissions.role_id -> roles.id
+role_permissions.permission_id -> permissions.id
+api_keys.organization_id -> organizations.id
+sessions.user_id -> users.id
+customers.user_id -> users.id
+customers.organization_id -> organizations.id
+addresses.customer_id -> customers.id
+products.supplier_id -> suppliers.id
+product_categories.product_id -> products.id
+product_categories.category_id -> categories.id
+variants.product_id -> products.id
+warehouses.address_id -> addresses.id
+inventory_items.variant_id -> variants.id
+inventory_items.warehouse_id -> warehouses.id
+carts.customer_id -> customers.id
+cart_items.cart_id -> carts.id
+cart_items.variant_id -> variants.id
+orders.customer_id -> customers.id
+orders.shipping_address_id -> addresses.id
+order_items.order_id -> orders.id
+order_items.variant_id -> variants.id
+order_coupons.order_id -> orders.id
+order_coupons.coupon_id -> coupons.id
+payments.order_id -> orders.id
+refunds.payment_id -> payments.id
+shipments.order_id -> orders.id
+shipments.warehouse_id -> warehouses.id
+shipment_items.shipment_id -> shipments.id
+shipment_items.order_item_id -> order_items.id
+invoices.order_id -> orders.id
+invoices.organization_id -> organizations.id
+invoice_lines.invoice_id -> invoices.id
+reviews.product_id -> products.id
+reviews.customer_id -> customers.id
+wishlists.customer_id -> customers.id
+wishlist_items.wishlist_id -> wishlists.id
+wishlist_items.product_id -> products.id
+notifications.user_id -> users.id
+audit_logs.user_id -> users.id
+audit_logs.organization_id -> organizations.id
