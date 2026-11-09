@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>D2 squared</title>
+    <meta name="description" content="Drag shapes in a D2 diagram and the .d2 file is edited for you." />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect x=%272%27 y=%272%27 width=%276%27 height=%276%27 rx=%271%27 fill=%27%233a6ff7%27/%3E%3Crect x=%279%27 y=%279%27 width=%275%27 height=%275%27 rx=%271%27 fill=%27%23e8590c%27/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header>
+      <strong class="brand">D2<sup>2</sup></strong>
+      <select id="example" aria-label="Example" hidden></select>
+      <span id="filename" class="muted" hidden></span>
+      <span class="grow"></span>
+      <button id="undo" title="Undo (Cmd/Ctrl-Z)" disabled>Undo</button>
+      <button id="redo" title="Redo (Shift-Cmd/Ctrl-Z)" disabled>Redo</button>
+      <button id="source-toggle" aria-pressed="true">Source</button>
+      <details id="more" class="menu">
+        <summary>More</summary>
+        <div class="menu-body">
+          <label
+            >Layout flows
+            <select id="dir" title="Click a box first to change only that box.">
+              <option value="">choose…</option>
+              <option value="down">Down</option>
+              <option value="right">Right</option>
+              <option value="up">Up</option>
+              <option value="left">Left</option>
+            </select>
+          </label>
+          <button id="unpin" title="Remove the positions the editor wrote and lay everything out again">Reset positions</button>
+          <label>Zoom <input type="range" id="zoom" min="0.1" max="1.5" step="0.05" value="0.5" aria-label="Zoom" /></label>
+          <button id="fit">Fit to window</button>
+          <hr class="site-only" />
+          <button id="open" class="site-only">Open a .d2 file…</button>
+          <button id="save" class="site-only">Save to a file</button>
+          <button id="share" class="site-only">Copy link to this diagram</button>
+        </div>
+      </details>
+    </header>
+    <main id="editor"></main>
+    <div id="statusbar"><span id="status">Loading…</span></div>
+    <aside id="panel">
+      <h2>
+        <span>File</span>
+        <span class="grow"></span>
+        <button id="edit" class="small site-only">Edit</button>
+        <button id="apply" class="small site-only" hidden>Apply</button>
+        <button id="cancel" class="small site-only" hidden>Cancel</button>
+      </h2>
+      <pre id="source"></pre>
+      <textarea id="source-edit" spellcheck="false" hidden></textarea>
+      <details class="help">
+        <summary>How to use</summary>
+        <ul>
+          <li>Drag a box onto a group to move it inside, or onto empty space to place it there.</li>
+          <li>Drag the dot at the end of an arrow onto another box to reconnect it.</li>
+          <li>Hold Alt to always place a box instead of moving it into a group.</li>
+          <li>Esc cancels a drag. Cmd/Ctrl-Z undoes. Double-click a placed box to release its position.</li>
+        </ul>
+      </details>
+    </aside>
+    <div id="loading" class="loading" hidden>
+      <div class="loading-card">
+        <div id="loading-text">Loading the layout engine…</div>
+        <progress id="loading-bar" max="1"></progress>
+        <div id="loading-note" class="muted">About 9 MB, once. Then it works offline.</div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

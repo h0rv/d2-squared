@@ -1,0 +1,5 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 140,
+  "ignorePatterns": ["dist", "public", "src/wasm_exec.js", "test-results", "playwright-report", "package-lock.json"]
+}
