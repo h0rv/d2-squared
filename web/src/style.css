@@ -352,11 +352,25 @@ select {
   text-align: left;
 }
 
-.menu hr {
-  height: 1px;
-  margin: 5px 4px;
-  border: 0;
-  background: var(--border);
+.menu-head {
+  margin: 0;
+  padding: 10px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.menu-head:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.menu > .menu-head:first-child,
+.menu > .site-only[hidden] + .menu-head {
+  margin-top: 0;
+  border-top: 0;
 }
 
 .menu-row {
@@ -372,6 +386,11 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.menu-row.flush {
+  justify-content: flex-start;
+  padding-left: 1px;
 }
 
 .mini-seg {
@@ -895,6 +914,15 @@ body.toasting .hint {
   .menu {
     top: 60px;
     width: min(272px, calc(100vw - 24px));
+  }
+  .text-view {
+    top: 64px;
+  }
+  body:has(#examples:not([hidden])) .text-view {
+    top: 108px;
+  }
+  body.hint-on.toasting .zoom {
+    bottom: calc(var(--inset-b) + 16px);
   }
   .zoom {
     right: auto;

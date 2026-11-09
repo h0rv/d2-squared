@@ -1,7 +1,7 @@
 import { contains, depth, editId, parentOf, rectDist, within } from "../geometry";
 import type { Candidate, Edit, PendingChange, Point, Shape, Target } from "../types";
 
-export const PLACING_NEEDS_TALA = "Placing boxes needs the TALA layout engine";
+export const PLACING_NEEDS_TALA = "Placing and resizing need the TALA layout engine";
 
 export type Zone =
   | { kind: "stay" }
@@ -126,7 +126,7 @@ export function doneText(target: Target, zone: Zone, name: Namer): string {
   const who = target.kind === "node" ? name(target.id) : "Arrow";
   if (zone.kind === "move") return `Moved ${who} ${zone.to ? "into " + name(zone.to) : "to the top level"}`;
   if (zone.kind === "pin") return `Placed ${who}`;
-  if (zone.kind === "reconnect") return `Arrow now ${zone.end === "dst" ? "points at" : "starts from"} ${name(zone.shape)}`;
+  if (zone.kind === "reconnect") return `Connected ${zone.end === "dst" ? "to" : "from"} ${name(zone.shape)}`;
   return "";
 }
 

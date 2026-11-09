@@ -33,7 +33,7 @@ type Candidate struct {
 	landID string
 }
 
-var errTalaOnly = errors.New("Placing boxes needs the TALA layout engine")
+var errTalaOnly = errors.New("Placing and resizing need the TALA layout engine")
 
 func plainCandidate(ctx context.Context, source, clean string, e Edit, landID, label string) (*Candidate, error) {
 	layout, err := layoutWith(ctx, clean, engineLayout(previewSeeds))

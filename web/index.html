@@ -47,10 +47,13 @@
     </div>
 
     <div id="menu" class="surface menu" role="menu" aria-label="More" hidden>
-      <button id="open" class="menu-item site-only" role="menuitem">Open file…</button>
-      <button id="save" class="menu-item site-only" role="menuitem">Save file</button>
-      <button id="share" class="menu-item site-only" role="menuitem">Share link</button>
-      <hr class="site-only" />
+      <div class="site-only">
+        <h2 class="menu-head">File</h2>
+        <button id="open" class="menu-item" role="menuitem">Open file…</button>
+        <button id="save" class="menu-item" role="menuitem">Save file</button>
+        <button id="share" class="menu-item" role="menuitem">Share link</button>
+      </div>
+      <h2 class="menu-head">Layout</h2>
       <div class="menu-row" role="group" aria-label="Layout direction">
         <span id="dir-label">Layout direction</span>
         <div class="mini-seg">
@@ -62,7 +65,6 @@
       </div>
       <button id="tidy" class="menu-item" role="menuitem" hidden>Tidy up</button>
       <button id="reset" class="menu-item" role="menuitem">Reset layout</button>
-      <hr />
       <div class="menu-row" role="group" aria-label="Layout engine">
         <span>Layout engine</span>
         <div class="mini-seg words">
@@ -71,6 +73,7 @@
           <button class="menu-item" role="menuitemradio" aria-checked="false" data-engine="dagre">dagre</button>
         </div>
       </div>
+      <h2 class="menu-head">Look</h2>
       <button id="sketch" class="menu-item spread" role="menuitemcheckbox" aria-checked="false">
         <span>Sketch</span><span class="tick" aria-hidden="true"></span>
       </button>
@@ -82,9 +85,8 @@
         <label for="dark-theme">Dark theme</label>
         <select id="dark-theme" class="menu-select"></select>
       </div>
-      <hr />
-      <div class="menu-row" role="group" aria-label="Export">
-        <span>Export</span>
+      <h2 class="menu-head">Export</h2>
+      <div class="menu-row flush" role="group" aria-label="Export">
         <div class="mini-seg words">
           <button class="menu-item" role="menuitem" data-export="svg">SVG</button>
           <button class="menu-item" role="menuitem" data-export="png">PNG</button>

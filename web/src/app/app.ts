@@ -7,6 +7,7 @@ import { ICONS, type IconName } from "../ui/icons";
 import { store } from "../ui/store";
 import { mountTextView, type TextView } from "../ui/textview";
 import { mountToasts, type Toasts } from "../ui/toast";
+import { PLACING_NEEDS_TALA } from "../editor/zones";
 import { EXAMPLES } from "./examples";
 import { exportAs, type ExportKind } from "./export";
 import { LocalFile } from "./files";
@@ -83,6 +84,7 @@ function wireViewToggle(text: TextView, editor: Editor): void {
   const words = $("view-text");
   const choose = (showText: boolean): void => {
     text.setActive(showText);
+    if (showText) editor.deselect();
     diagram.setAttribute("aria-checked", String(!showText));
     words.setAttribute("aria-checked", String(showText));
     if (!showText) window.requestAnimationFrame(() => editor.fit());
@@ -201,7 +203,7 @@ function wireMenu(): void {
 
 const HINT_TEXT = "Drag a box into another group, or drag an arrow's end onto another box";
 const HINT_SHORT = "Drag a box into a group";
-const HINT_LIMITED = "Placing boxes needs the TALA layout engine. You can still move boxes into groups and reconnect arrows.";
+const HINT_LIMITED = PLACING_NEEDS_TALA;
 
 const hintState = { armed: false, limited: false };
 const narrow = window.matchMedia(PHONE);

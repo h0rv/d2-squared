@@ -108,6 +108,8 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
 
   const eid = await page.evaluate(() => window.editor!.view!.conns.find((c) => c.src === "edge.mobile")!.id);
   r = await d.drag(await d.end(eid, "dst"), await d.center("services.users"));
+  expect(r.status).toBe("Connect to User Service");
+  await expect(page.locator("#toast")).toContainText("Connected to User Service");
   expect(served.source()).toMatch(/edge\.mobile -> services\.users/);
 
   const before = served.source();

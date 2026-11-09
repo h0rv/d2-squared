@@ -5,7 +5,7 @@ import { showTip } from "../ui/toast";
 import type { Candidate, Conn, Edit, Path, PendingChange, Point, Shape, Target, View } from "../types";
 import { createHits, type EndSlot } from "./hits";
 import { mountScene, type Piece } from "./scene";
-import { describeConfig } from "./config-text";
+import { DIRECTIONS, describeConfig } from "./config-text";
 import { doneText, pendingFor, pickEnd, pickNode, tipFor, type Zone, type ZoneContext } from "./zones";
 
 const EDGE = 56;
@@ -129,6 +129,7 @@ export interface Editor {
   undo(): Promise<void>;
   redo(): Promise<void>;
   send(edit: Edit): Promise<void>;
+  deselect(): void;
   fit(animate?: boolean): void;
   setScale(scale: number): void;
   zoomBy(factor: number): void;
@@ -1202,7 +1203,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
 
   const DONE: Partial<Record<Edit["kind"], (e: Edit) => string>> = {
     config: (e) => describeConfig(e),
-    direction: () => "Layout direction changed",
+    direction: (e) => `Layout direction: ${DIRECTIONS[e.to ?? ""] ?? e.to ?? ""}`,
     tidy: (e) => `Tidied up ${labelOf(e.key)}`,
   };
 
@@ -1211,7 +1212,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     busy = true;
     setStatus("Laying out…", "busy");
     try {
-      const done = DONE[edit.kind]?.(edit) ?? "Layout reset";
+      const done = DONE[edit.kind]?.(edit) ?? "Reset layout";
       const v = await engine.commit(edit, view.version);
       applyView(v);
       setStatus(done, "done");
@@ -1298,6 +1299,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     undo: () => history("undo"),
     redo: () => history("redo"),
     send,
+    deselect: () => select(""),
     fit,
     setScale,
     zoomBy,
