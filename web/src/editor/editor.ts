@@ -1,24 +1,38 @@
 import type { Engine } from "../engine/engine";
 import { cls, contains, depth, midpoint, nameOf, pathD, within } from "../geometry";
 import { parseSvg, svgEl } from "../svg";
-import type { Candidate, Conn, Edit, Path, Point, Shape, Target, View } from "../types";
-import { renderDiff, type DiffModel } from "./diff-panel";
-import { doneText, pickEnd, pickNode, planEnd, planNode, statusFor, type PlanItem, type Zone, type ZoneContext } from "./zones";
+import type { Candidate, Conn, Edit, Path, PendingChange, Point, Shape, Target, View } from "../types";
+import { doneText, pickEnd, pickNode, tipFor, type Zone, type ZoneContext } from "./zones";
 
 const EASE = "cubic-bezier(.2,.8,.2,1)";
 const TWEEN_MS = 260;
-const READABLE = 0.78;
 const EDGE = 56;
 const MAX_SCROLL = 22;
 const FAN_PX = 16;
-const FAN_HIT_PX = 7;
+const FAN_HIT_PX = 9;
+const END_HIT_PX = 14;
+const END_HIT_TOUCH_PX = 22;
+const ARROW_HIT_PX = 9;
+const ARROW_HIT_TOUCH_PX = 18;
+const MIN_SCALE = 0.05;
+const MAX_SCALE = 3;
+const FIT_MAX = 1.25;
+const LIFT = 0.03;
+const LIFT_MS = 140;
+const KEEP_PX = 96;
+
+export interface Insets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
 
 export type StatusKind = "" | "busy" | "done" | "err";
 
 export interface EditorOptions {
   behaviors?: string[];
   hoverOutline?: boolean;
-  hint?: () => string;
   onEdit?: (edit: Edit, source: string) => void;
 }
 
@@ -28,6 +42,17 @@ interface Attached {
   srcInside?: boolean;
   mid0: [number, number];
   label?: SVGGElement;
+}
+
+interface Gesture {
+  kind: "pan" | "pinch";
+  id: number;
+  x: number;
+  y: number;
+  tx: number;
+  ty: number;
+  scale: number;
+  dist: number;
 }
 
 interface FloatLayer {
@@ -51,7 +76,6 @@ interface Drag {
   attached: Attached[];
   hidden: Element[];
   float: FloatLayer | null;
-  plan: PlanItem[];
   client: { clientX: number; clientY: number };
   zone: Zone | null;
   raf: number;
@@ -69,13 +93,22 @@ interface Drag {
   stageRect: DOMRect | null;
   fixed: [number, number] | null;
   fixedShape: string;
+  pointer: string;
+  pivot: Point;
+  liftAt: number;
+  lift: number;
+  pending: string;
+  overlay: string;
   onKey: (e: KeyboardEvent) => void;
 }
 
 export interface EditorEvents {
-  status: (text?: string, kind?: StatusKind, title?: string) => void;
+  status: (text: string, kind: StatusKind) => void;
   view: (view: View, prev: View | null) => void;
   select: (id: string) => void;
+  zoom: (scale: number) => void;
+  pending: (change: PendingChange | null) => void;
+  error: (message: string | null) => void;
 }
 
 export interface Editor {
@@ -83,9 +116,14 @@ export interface Editor {
   undo(): Promise<void>;
   redo(): Promise<void>;
   send(edit: Edit): Promise<void>;
-  fit(): void;
+  fit(animate?: boolean): void;
   setScale(scale: number): void;
+  zoomBy(factor: number): void;
+  setInsets(insets: Insets, animate?: boolean): void;
+  reveal(id: string): void;
+  label(id: string): string;
   readonly scale: number;
+  readonly fitted: boolean;
   readonly view: View | null;
   readonly selected: string;
   readonly busy: boolean;
@@ -93,38 +131,54 @@ export interface Editor {
   screenPoint(x: number, y: number): Point;
   endScreen(edge: string, end: "src" | "dst"): Point;
   shape(id: string): Shape | undefined;
-  statusLine(): string;
 }
 
 export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {}): Editor {
   const enabled = new Set(opts.behaviors ?? ["reparent", "reconnect", "pin"]);
   root.classList.add("d2-root");
-  root.innerHTML = `<div class="d2-stage"><div class="d2-canvas"><div class="d2-svg"></div><svg class="d2-over"></svg></div></div>
-    <div class="d2-diff" hidden></div>`;
+  root.innerHTML = `<div class="d2-stage"><div class="d2-canvas"><div class="d2-svg"></div><svg class="d2-sel"></svg><svg class="d2-over"></svg></div></div>
+    <div class="d2-tip" aria-hidden="true" hidden></div>`;
   const q = <T extends Element>(sel: string): T => root.querySelector(sel) as T;
   const stage = q<HTMLElement>(".d2-stage");
   const canvas = q<HTMLElement>(".d2-canvas");
   const svgHost = q<HTMLElement>(".d2-svg");
   const over = q<SVGSVGElement>(".d2-over");
-  const diffBox = q<HTMLElement>(".d2-diff");
+  const selLayer = q<SVGSVGElement>(".d2-sel");
+  const tip = q<HTMLElement>(".d2-tip");
 
   let view: View | null = null;
   let outer: SVGSVGElement | null = null;
   let inner: SVGSVGElement | null = null;
   let box = { x: 0, y: 0, w: 1, h: 1 };
   let scale = 0.5;
+  let tx = 0;
+  let ty = 0;
+  let fitted = true;
+  let insets: Insets = { top: 64, right: 24, bottom: 64, left: 24 };
   let selected = "";
   let drag: Drag | null = null;
+  let gesture: Gesture | null = null;
+  let spaceDown = false;
+  let armed = "";
+  let flight = 0;
+  const touches = new Map<number, Point>();
   let busy = false;
   let pendingExternal: View | null = null;
   let hover: string | null = null;
   let shapes = new Map<string, Shape>();
   let groups = new Map<string, Element>();
-  let orderTarget: SVGSVGElement | null = null;
+  let orderTarget: string[] | null = null;
   let rectCache: DOMRect | null = null;
   const stats: NonNullable<Window["d2Stats"]> = { drags: [], last: null };
   window.d2Stats = stats;
-  const listeners: { [K in keyof EditorEvents]: EditorEvents[K][] } = { status: [], view: [], select: [] };
+  const listeners: { [K in keyof EditorEvents]: EditorEvents[K][] } = {
+    status: [],
+    view: [],
+    select: [],
+    zoom: [],
+    pending: [],
+    error: [],
+  };
   const emit = <K extends keyof EditorEvents>(name: K, ...args: Parameters<EditorEvents[K]>) => {
     for (const fn of listeners[name]) (fn as (...a: Parameters<EditorEvents[K]>) => void)(...args);
   };
@@ -134,7 +188,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     shapes,
     scale,
     enabled,
-    canvasBox: box,
   });
 
   function indexView(v: View): void {
@@ -152,24 +205,35 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   }
 
   const rect = (): DOMRect => rectCache ?? (rectCache = outer!.getBoundingClientRect());
-  stage.addEventListener("scroll", () => {
-    rectCache = null;
-  });
   window.addEventListener("resize", () => {
     rectCache = null;
   });
 
-  function sizeCanvas(): void {
+  const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
+
+  function applyTransform(): void {
     rectCache = null;
+    canvas.style.transform = `translate(${tx}px, ${ty}px)`;
+    let grid = 24 * scale;
+    while (grid < 14) grid *= 2;
+    stage.style.setProperty("--grid", `${grid}px`);
+    stage.style.setProperty("--grid-x", `${tx}px`);
+    stage.style.setProperty("--grid-y", `${ty}px`);
+  }
+
+  function sizeCanvas(): void {
     const w = box.w * scale;
     const h = box.h * scale;
     outer!.setAttribute("width", String(w));
     outer!.setAttribute("height", String(h));
     canvas.style.width = w + "px";
     canvas.style.height = h + "px";
-    over.setAttribute("width", String(w));
-    over.setAttribute("height", String(h));
-    over.setAttribute("viewBox", `${box.x} ${box.y} ${box.w} ${box.h}`);
+    for (const layer of [over, selLayer]) {
+      layer.setAttribute("width", String(w));
+      layer.setAttribute("height", String(h));
+      layer.setAttribute("viewBox", `${box.x} ${box.y} ${box.w} ${box.h}`);
+    }
+    applyTransform();
   }
 
   function mountFresh(v: View): void {
@@ -181,20 +245,128 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     readBox();
     sizeCanvas();
     indexView(v);
+    canvas.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: "ease-out" });
+  }
+
+  function keepVisible(): void {
+    const w = stage.clientWidth - insets.right;
+    const h = stage.clientHeight - insets.bottom;
+    tx = clamp(tx, KEEP_PX - box.w * scale, w - KEEP_PX);
+    ty = clamp(ty, KEEP_PX - box.h * scale, h - KEEP_PX);
+  }
+
+  function moveView(next: { scale: number; tx: number; ty: number }): void {
+    const resized = next.scale !== scale;
+    scale = next.scale;
+    tx = next.tx;
+    ty = next.ty;
+    if (!view || !outer) return;
+    if (resized) {
+      sizeCanvas();
+      emit("zoom", scale);
+    } else {
+      applyTransform();
+    }
+  }
+
+  function cancelFlight(): void {
+    flight++;
+  }
+
+  function zoomAt(next: number, cx: number, cy: number): void {
+    cancelFlight();
+    const r = stage.getBoundingClientRect();
+    const px = cx - r.left;
+    const py = cy - r.top;
+    const s = clamp(next, MIN_SCALE, MAX_SCALE);
+    const k = s / scale;
+    fitted = false;
+    moveView({ scale: s, tx: px - (px - tx) * k, ty: py - (py - ty) * k });
+    keepVisible();
+    applyTransform();
   }
 
   function setScale(s: number): void {
-    scale = Math.min(Math.max(s, 0.1), 2);
-    if (view && outer) sizeCanvas();
-    emit("status");
+    const r = stage.getBoundingClientRect();
+    zoomAt(s, r.left + (stage.clientWidth - insets.right) / 2, r.top + (stage.clientHeight - insets.bottom) / 2);
   }
 
-  function fit(): void {
-    if (!view) return;
-    const w = (stage.clientWidth - 24) / box.w;
-    const h = (stage.clientHeight - 24) / box.h;
-    setScale(Math.min(Math.max(Math.min(w, h), Math.min(w, READABLE)), 1.5));
+  function zoomBy(factor: number): void {
+    setScale(scale * factor);
   }
+
+  function panBy(dx: number, dy: number): void {
+    cancelFlight();
+    fitted = false;
+    tx += dx;
+    ty += dy;
+    keepVisible();
+    applyTransform();
+  }
+
+  function fitTarget(): { scale: number; tx: number; ty: number } {
+    const aw = Math.max(stage.clientWidth - insets.left - insets.right, 40);
+    const ah = Math.max(stage.clientHeight - insets.top - insets.bottom, 40);
+    const s = clamp(Math.min(aw / box.w, ah / box.h), MIN_SCALE, FIT_MAX);
+    return { scale: s, tx: insets.left + (aw - box.w * s) / 2, ty: insets.top + (ah - box.h * s) / 2 };
+  }
+
+  function fly(to: { scale: number; tx: number; ty: number }, ms = 260): void {
+    const from = { scale, tx, ty };
+    const id = ++flight;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      if (id !== flight) return;
+      const k = Math.min((now - t0) / ms, 1);
+      const e = 1 - Math.pow(1 - k, 3);
+      const mix = (a: number, b: number) => a + (b - a) * e;
+      moveView({ scale: Math.exp(mix(Math.log(from.scale), Math.log(to.scale))), tx: mix(from.tx, to.tx), ty: mix(from.ty, to.ty) });
+      if (k < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  function fit(animate = false): void {
+    if (!view || !outer) return;
+    fitted = true;
+    const target = fitTarget();
+    if (animate && !matchMedia("(prefers-reduced-motion: reduce)").matches) fly(target);
+    else {
+      cancelFlight();
+      moveView(target);
+    }
+  }
+
+  function setInsets(next: Insets, animate = false): void {
+    insets = next;
+    if (fitted) fit(animate);
+    else if (view && outer) {
+      keepVisible();
+      applyTransform();
+    }
+  }
+
+  function reveal(id: string): void {
+    const s = shapes.get(id);
+    if (!s) return;
+    const c = { x: (s.x + s.width / 2 - box.x) * scale + tx, y: (s.y + s.height / 2 - box.y) * scale + ty };
+    const w = stage.clientWidth - insets.right;
+    const h = stage.clientHeight - insets.bottom;
+    const m = 120;
+    const dx = Math.max(0, c.x - (w - m)) - Math.max(0, m - c.x);
+    const dy = Math.max(0, c.y - (h - m)) - Math.max(0, m - c.y);
+    if (dx || dy) {
+      tx -= dx;
+      ty -= dy;
+      fitted = false;
+      applyTransform();
+    }
+  }
+
+  new ResizeObserver(() => {
+    rectCache = null;
+    if (view && outer && fitted) fit();
+  }).observe(stage);
 
   function toDiagram(ev: { clientX: number; clientY: number }): Point {
     const r = rect();
@@ -223,6 +395,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     next: [number, number];
     at: Point;
     siblings: number;
+    key: string;
   }
 
   let slotCache: { version: number; scale: number; slots: EndSlot[] } | null = null;
@@ -237,8 +410,8 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
         const pt = route[0];
         const next = route[1];
         if (!pt || !next) continue;
-        const slot: EndSlot = { conn, end, pt, next, at: { x: pt[0], y: pt[1] }, siblings: 1 };
         const key = `${end === "src" ? conn.src : conn.dst}|${Math.round(pt[0] / 4)}|${Math.round(pt[1] / 4)}`;
+        const slot: EndSlot = { conn, end, pt, next, at: { x: pt[0], y: pt[1] }, siblings: 1, key };
         groupsByKey.set(key, [...(groupsByKey.get(key) ?? []), slot]);
       }
     }
@@ -260,14 +433,17 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     return slots;
   }
 
-  function hitEnd(p: Point): EndSlot | null {
+  const isTouch = (type: string): boolean => type === "touch";
+
+  function hitEnd(p: Point, touch = false): EndSlot | null {
     if (!enabled.has("reconnect")) return null;
     let best: EndSlot | null = null;
     let bestDist = Infinity;
     for (const slot of endSlots()) {
-      const radius = (slot.siblings > 1 ? FAN_HIT_PX : 11) / scale;
+      if (touch && armed !== slot.conn.id) continue;
+      const px = slot.siblings > 1 ? FAN_HIT_PX : touch ? END_HIT_TOUCH_PX : END_HIT_PX;
       const d = Math.hypot(slot.at.x - p.x, slot.at.y - p.y);
-      if (d < radius && d < bestDist) {
+      if (d < px / scale && d < bestDist) {
         best = slot;
         bestDist = d;
       }
@@ -275,40 +451,75 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     return best;
   }
 
-  function nearCluster(p: Point): EndSlot[] {
-    const reach = (FAN_PX * 2.5) / scale;
-    return endSlots().filter((s) => s.siblings > 1 && Math.hypot(s.pt[0] - p.x, s.pt[1] - p.y) < reach);
+  function segmentDist(p: Point, a: [number, number], b: [number, number]): number {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const len = dx * dx + dy * dy;
+    const k = len === 0 ? 0 : clamp(((p.x - a[0]) * dx + (p.y - a[1]) * dy) / len, 0, 1);
+    return Math.hypot(p.x - (a[0] + k * dx), p.y - (a[1] + k * dy));
   }
 
-  function drawHover(end: EndSlot | null, shape: Shape | null, cluster: EndSlot[]): void {
+  function nearConn(p: Point, touch = false): Conn | null {
+    if (!enabled.has("reconnect")) return null;
+    const reach = (touch ? ARROW_HIT_TOUCH_PX : ARROW_HIT_PX) / scale;
+    let best: Conn | null = null;
+    let bestDist = reach;
+    for (const conn of view!.conns) {
+      for (let i = 1; i < conn.route.length; i++) {
+        const d = segmentDist(p, conn.route[i - 1]!, conn.route[i]!);
+        if (d <= bestDist) {
+          best = conn;
+          bestDist = d;
+        }
+      }
+    }
+    return best;
+  }
+
+  function drawHandles(conn: Conn | null, end: EndSlot | null, shape: Shape | null): void {
     over.replaceChildren();
-    for (const slot of cluster) {
-      svgEl("circle", { cx: slot.at.x, cy: slot.at.y, r: 5 / scale, class: "end-dot" + (slot === end ? "" : " faint") }, over);
+    const px = 1 / scale;
+    if (conn) {
+      const mine = endSlots().filter((s) => s.conn.id === conn.id);
+      const keys = new Set(mine.filter((s) => s.siblings > 1).map((s) => s.key));
+      const cluster = endSlots().filter((s) => keys.has(s.key));
+      for (const key of keys) {
+        const group = cluster.filter((s) => s.key === key);
+        const first = group[0]!.at;
+        const last = group[group.length - 1]!.at;
+        svgEl("line", { x1: first.x, y1: first.y, x2: last.x, y2: last.y, class: "fan-bar", "stroke-width": 16 * px }, over);
+      }
+      for (const slot of cluster) {
+        if (slot.conn.id !== conn.id) svgEl("circle", { cx: slot.at.x, cy: slot.at.y, r: 4 * px, class: "end-dot faint" }, over);
+      }
+      for (const slot of mine) {
+        const on = slot === end;
+        svgEl("circle", { cx: slot.at.x, cy: slot.at.y, r: (on ? 8 : 6) * px, class: "end-dot" + (on ? " on" : "") }, over);
+      }
+    } else if (shape && opts.hoverOutline !== false) {
+      svgEl("rect", { x: shape.x, y: shape.y, width: shape.width, height: shape.height, rx: 6, class: "hover-box" }, over);
     }
-    if (end && !cluster.includes(end)) {
-      svgEl("circle", { cx: end.at.x, cy: end.at.y, r: 6 / scale, class: "end-dot" }, over);
-    } else if (!end && cluster.length === 0 && shape && opts.hoverOutline !== false) {
-      svgEl("rect", { x: shape.x, y: shape.y, width: shape.width, height: shape.height, rx: 4, class: "hover-box" }, over);
-    }
+  }
+
+  function drawSelection(): void {
+    selLayer.replaceChildren();
+    const s = selected ? shapes.get(selected) : undefined;
+    if (!s) return;
+    svgEl("rect", { x: s.x - 3, y: s.y - 3, width: s.width + 6, height: s.height + 6, rx: 8, class: "sel-box" }, selLayer);
   }
 
   function onHover(ev: PointerEvent): void {
-    if (drag || busy || !view) return;
+    if (drag || busy || !view || gesture) return;
+    const touch = isTouch(ev.pointerType);
     const p = toDiagram(ev);
-    const end = hitEnd(p);
-    const cluster = end ? (end.siblings > 1 ? nearCluster({ x: end.pt[0], y: end.pt[1] }) : []) : nearCluster(p);
-    const shape = end || cluster.length ? null : hitShape(p);
-    const key = end
-      ? `e${end.conn.id}${end.end}`
-      : cluster.length
-        ? `c${cluster[0]!.conn.id}${cluster[0]!.end}`
-        : shape
-          ? `s${shape.id}`
-          : "";
+    const end = hitEnd(p, touch);
+    const conn = end ? end.conn : nearConn(p, touch);
+    const shape = conn ? null : hitShape(p);
+    const key = conn ? `c${conn.id}${end ? end.end : ""}` : shape ? `s${shape.id}` : "";
     if (key === hover) return;
     hover = key;
-    drawHover(end, shape, cluster);
-    canvas.style.cursor = end ? "crosshair" : shape ? "grab" : "default";
+    drawHandles(conn, end, shape);
+    stage.style.cursor = spaceDown ? "grab" : end ? "crosshair" : shape ? "grab" : "default";
   }
 
   function setPath(a: Attached, pts: [number, number][]): void {
@@ -321,16 +532,26 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
 
   const groupOf = (id: string): Element | undefined => groups.get(cls(id));
 
-  function setStatus(text: string, kind: StatusKind = "", title = ""): void {
-    emit("status", text, kind, title);
+  function setStatus(text: string, kind: StatusKind = ""): void {
+    emit("status", text, kind);
   }
 
-  function zoneModel(d: Drag): DiffModel | null {
+  function labelOf(id: string): string {
+    const text = groupOf(id)?.querySelector("text")?.textContent?.trim();
+    return text || nameOf(id);
+  }
+
+  function tipText(d: Drag): string {
+    return d.zone ? tipFor(d.target, d.zone, labelOf) : "";
+  }
+
+  function pendingChange(d: Drag): PendingChange | null {
     const z = d.zone;
     if (!z || z.kind === "stay" || z.kind === "none") return null;
+    const title = tipText(d);
     if (z.kind === "pin") {
       return {
-        title: `Place ${nameOf(d.target.kind === "node" ? d.target.id : "")}`,
+        title,
         lines: [
           { op: "+", text: `left: ${z.left}` },
           { op: "+", text: `top: ${z.top}` },
@@ -338,66 +559,40 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       };
     }
     const cand = d.cands.get(z.key);
-    if (!cand) return { title: z.title, pending: true };
-    return { title: z.title, lines: cand.diff, pins: cand.pinLines };
+    if (!cand) return { title, working: true };
+    return { title, lines: cand.diff, saved: cand.pinLines };
   }
 
   function renderOverlay(d: Drag): void {
-    over.replaceChildren();
     const z = d.zone;
     const px = 1 / scale;
     if (d.target.kind === "node") {
-      const me = shapes.get(d.target.id);
-      if (!me) return;
-      svgEl(
-        "rect",
-        { x: me.x, y: me.y, width: me.width, height: me.height, rx: 6, class: "zone origin" + (z && z.kind === "stay" ? " active" : "") },
-        over,
-      );
-      for (const p of d.plan) {
-        const c = d.cands.get(p.key);
-        const on = z && z.kind === "move" && z.key === p.key;
-        const l = c ? c.landing : p.box;
-        svgEl(
-          "rect",
-          { x: l.x, y: l.y, width: l.width, height: l.height, rx: 6, class: "zone" + (c ? "" : " prov") + (on ? " active" : "") },
-          over,
-        );
-      }
+      const key = z && z.kind === "move" ? `${z.key}|${d.cands.has(z.key)}` : "";
+      if (key === d.overlay) return;
+      d.overlay = key;
+      over.replaceChildren();
       if (z && z.kind === "move") {
         const target = z.to ? shapes.get(z.to) : null;
         if (target) svgEl("rect", { x: target.x, y: target.y, width: target.width, height: target.height, rx: 8, class: "target" }, over);
-        const l = d.cands.get(z.key)?.landing ?? d.plan.find((p) => p.key === z.key)?.box;
-        if (l) {
-          const t = svgEl("text", { x: l.x, y: l.y - 8 * px, class: "zone-label", "font-size": 12 * px }, over);
-          t.textContent = z.title;
+        const landing = d.cands.get(z.key)?.landing;
+        const inside =
+          !target ||
+          (landing &&
+            landing.x >= target.x &&
+            landing.y >= target.y &&
+            landing.x + landing.width <= target.x + target.width &&
+            landing.y + landing.height <= target.y + target.height);
+        if (landing && inside) {
+          svgEl("rect", { x: landing.x, y: landing.y, width: landing.width, height: landing.height, rx: 6, class: "landing" }, over);
         }
       }
-      if (z && z.kind === "pin") {
-        const t = svgEl("text", { class: "zone-label pin", x: me.x + d.cur.dx, y: me.y + d.cur.dy - 8 * px, "font-size": 12 * px }, over);
-        t.textContent = "place here";
-      }
-    } else {
-      for (const p of d.plan) {
-        const exact = d.cands.has(p.key);
-        const on = z && z.kind === "reconnect" && z.shape === p.shape;
-        svgEl(
-          "rect",
-          {
-            x: p.box.x,
-            y: p.box.y,
-            width: p.box.width,
-            height: p.box.height,
-            rx: 4,
-            class: "zone" + (exact ? "" : " prov") + (on ? " active" : ""),
-          },
-          over,
-        );
-      }
-      if (z && z.kind === "reconnect") {
-        const s = shapes.get(z.shape);
-        if (!s) return;
-        svgEl("rect", { x: s.x, y: s.y, width: s.width, height: s.height, rx: 4, class: "target" }, over);
+      return;
+    }
+    over.replaceChildren();
+    if (z && z.kind === "reconnect") {
+      const s = shapes.get(z.shape);
+      if (s) {
+        svgEl("rect", { x: s.x, y: s.y, width: s.width, height: s.height, rx: 6, class: "target" }, over);
         const cols = s.cols ?? [];
         if (z.row >= 0 && cols.length > 0) {
           const rh = s.height / (cols.length + 1);
@@ -405,6 +600,33 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
         }
       }
     }
+    svgEl("circle", { cx: d.ptr.x, cy: d.ptr.y, r: 7 * px, class: "end-dot on" }, over);
+  }
+
+  function renderTip(d: Drag): void {
+    const text = tipText(d);
+    if (!text) {
+      tip.hidden = true;
+      return;
+    }
+    if (tip.textContent !== text) tip.textContent = text;
+    tip.hidden = false;
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    const touch = isTouch(d.pointer);
+    let x = d.client.clientX + 16;
+    let y = touch ? d.client.clientY - h - 48 : d.client.clientY + 20;
+    if (x + w > window.innerWidth - 8) x = d.client.clientX - w - 16;
+    if (y + h > window.innerHeight - 8) y = d.client.clientY - h - 16;
+    tip.style.transform = `translate3d(${Math.max(8, x)}px, ${Math.max(8, y)}px, 0)`;
+  }
+
+  function publishPending(d: Drag): void {
+    const model = pendingChange(d);
+    const key = model ? `${model.title}|${model.working ? "w" : (model.lines?.length ?? 0)}` : "";
+    if (key === d.pending) return;
+    d.pending = key;
+    emit("pending", model);
   }
 
   function ensureCandidate(d: Drag, z: Zone | null): void {
@@ -422,8 +644,13 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     );
   }
 
+  function floatTransform(d: Drag, dx: number, dy: number, lift: number): string {
+    const { x, y } = d.pivot;
+    return `translate(${dx} ${dy}) translate(${x} ${y}) scale(${lift}) translate(${-x} ${-y})`;
+  }
+
   function applyFloat(d: Drag): void {
-    const t = `translate(${d.cur.dx} ${d.cur.dy})`;
+    const t = floatTransform(d, d.cur.dx, d.cur.dy, d.lift);
     for (const g of d.groups) g.setAttribute("transform", t);
   }
 
@@ -481,9 +708,10 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     d.raf = 0;
     if (drag !== d || !d.active) return;
     const t0 = performance.now();
-    const scrolled = autoscroll(d);
-    if (scrolled) d.ptr = toDiagram(d.client);
+    const panned = autoPan(d);
+    if (panned) d.ptr = toDiagram(d.client);
     d.cur = { dx: d.ptr.x - d.start.x, dy: d.ptr.y - d.start.y };
+    d.lift = 1 + LIFT * Math.min(1, (t0 - d.liftAt) / LIFT_MS);
     if (d.target.kind === "node") {
       applyFloat(d);
       drawAttached(d);
@@ -499,33 +727,34 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
     ensureCandidate(d, d.zone);
     renderOverlay(d);
-    renderDiffFor(d);
-    setStatus(statusFor(d.target, d.zone), "busy");
+    renderTip(d);
+    publishPending(d);
     maybeRoute(d);
     d.stats.frameWork.push(performance.now() - t0);
-    if (scrolled) schedule(d);
+    if (panned || d.lift < 1 + LIFT) schedule(d);
   }
 
-  function renderDiffFor(d: Drag | null): void {
-    renderDiff(diffBox, d ? zoneModel(d) : null);
-  }
-
-  function autoscroll(d: Drag): boolean {
+  function autoPan(d: Drag): boolean {
     const r = d.stageRect;
     if (!r) return false;
     const c = d.client;
     const speed = (p: number, lo: number, hi: number) =>
       (p < lo + EDGE ? -Math.min(1, (lo + EDGE - p) / EDGE) : p > hi - EDGE ? Math.min(1, (p - (hi - EDGE)) / EDGE) : 0) * MAX_SCROLL;
-    const vx = speed(c.clientX, r.left, r.right);
-    const vy = speed(c.clientY, r.top, r.bottom);
+    let vx = speed(c.clientX, r.left, r.right - insets.right);
+    let vy = speed(c.clientY, r.top, r.bottom - insets.bottom);
+    const cr = canvas.getBoundingClientRect();
+    if ((vx > 0 && cr.right <= r.right - insets.right) || (vx < 0 && cr.left >= r.left)) vx = 0;
+    if ((vy > 0 && cr.bottom <= r.bottom - insets.bottom) || (vy < 0 && cr.top >= r.top)) vy = 0;
     if (!vx && !vy) return false;
-    const x0 = stage.scrollLeft;
-    const y0 = stage.scrollTop;
-    stage.scrollLeft = x0 + vx;
-    stage.scrollTop = y0 + vy;
-    if (stage.scrollLeft === x0 && stage.scrollTop === y0) return false;
-    rectCache = null;
-    return true;
+    const x0 = tx;
+    const y0 = ty;
+    cancelFlight();
+    fitted = false;
+    tx -= vx;
+    ty -= vy;
+    keepVisible();
+    applyTransform();
+    return tx !== x0 || ty !== y0;
   }
 
   function startPreview(d: Drag): void {
@@ -556,7 +785,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     const i = inner!.cloneNode(false) as SVGSVGElement;
     o.setAttribute("class", "d2-float");
     o.appendChild(i);
-    canvas.insertBefore(o, over);
+    canvas.insertBefore(o, selLayer);
     const markers = new Map<string, string>();
     return {
       outer: o,
@@ -626,7 +855,14 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
         if (a && b) insideGroups.push(g);
         else if (a || b) edges.push({ conn: c, group: g, srcInside: a });
       }
-      d.groups = [...moving, ...insideGroups].map((g) => floatClone(d, g));
+      const rootGroup = groupOf(rootId);
+      d.groups = [...moving, ...insideGroups].map((g) => {
+        const clone = floatClone(d, g);
+        if (g === rootGroup) clone.classList.add("lift");
+        return clone;
+      });
+      const me = shapes.get(rootId);
+      if (me) d.pivot = { x: me.x + me.width / 2, y: me.y + me.height / 2 };
       for (const e of edges) {
         const gc = floatClone(d, e.group);
         const path = gc.querySelector("path");
@@ -648,7 +884,9 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       d.fixedShape = d.target.end === "dst" ? c.src : c.dst;
     }
     canvas.classList.add("dragging");
+    stage.classList.add("dragging");
     hover = null;
+    d.liftAt = performance.now();
     schedule(d);
   }
 
@@ -663,14 +901,14 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     from: { dx: number; dy: number },
     to: { dx: number; dy: number },
     ms: number,
-    step: (x: number, y: number) => void,
+    step: (x: number, y: number, k: number) => void,
   ): Promise<void> {
     return new Promise((resolve) => {
       const t0 = performance.now();
       const tick = (now: number) => {
         const k = Math.min((now - t0) / ms, 1);
         const e = 1 - Math.pow(1 - k, 3);
-        step(from.dx + (to.dx - from.dx) * e, from.dy + (to.dy - from.dy) * e);
+        step(from.dx + (to.dx - from.dx) * e, from.dy + (to.dy - from.dy) * e, e);
         if (k < 1) requestAnimationFrame(tick);
         else resolve();
       };
@@ -678,20 +916,28 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     });
   }
 
+  function endDrag(): void {
+    canvas.classList.remove("dragging");
+    stage.classList.remove("dragging");
+    tip.hidden = true;
+    emit("pending", null);
+  }
+
   async function settleBack(d: Drag): Promise<void> {
     busy = true;
-    renderDiffFor(null);
+    endDrag();
     over.replaceChildren();
     if (d.target.kind === "node") {
-      await tween({ ...d.cur }, { dx: 0, dy: 0 }, 160, (x, y) => {
-        for (const g of d.groups) g.setAttribute("transform", `translate(${x} ${y})`);
+      const from = d.lift;
+      await tween({ ...d.cur }, { dx: 0, dy: 0 }, 160, (x, y, k) => {
         d.cur = { dx: x, dy: y };
+        d.lift = 1 + (from - 1) * (1 - k);
+        applyFloat(d);
         drawAttached(d);
       });
     }
     restoreGroups(d);
     busy = false;
-    setStatus(statusLine(), "", detail());
     flushExternal();
   }
 
@@ -700,12 +946,13 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     cancelAnimationFrame(d.raf);
     d.finishing = true;
     drag = null;
-    canvas.classList.remove("dragging");
+    endDrag();
     window.removeEventListener("keydown", d.onKey);
     if (!d.active) {
       d.abort.abort();
       over.replaceChildren();
       if (!cancelled && d.target.kind === "node") select(d.target.id);
+      if (!cancelled && isTouch(d.pointer)) armConn(nearConn(toDiagram(d.client), true));
       return;
     }
     const z = d.zone;
@@ -715,16 +962,20 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
     const dropAt = performance.now();
     busy = true;
-    renderDiffFor(null);
+    const message = doneText(d.target, z, labelOf);
     const cand = "key" in z ? d.cands.get(z.key) : undefined;
-    if (!cand && z.kind !== "pin") setStatus("Working out the exact result…", "busy");
     const moved = d.target.kind === "node" ? shapes.get(d.target.id) : undefined;
     if (z.kind === "move" && cand && moved) {
-      void tween({ ...d.cur }, { dx: cand.landing.x - moved.x, dy: cand.landing.y - moved.y }, 200, (x, y) => {
+      const from = d.lift;
+      void tween({ ...d.cur }, { dx: cand.landing.x - moved.x, dy: cand.landing.y - moved.y }, 200, (x, y, k) => {
         d.cur = { dx: x, dy: y };
+        d.lift = 1 + (from - 1) * (1 - k);
         applyFloat(d);
         drawAttached(d);
       });
+    } else {
+      d.lift = 1;
+      if (d.target.kind === "node") applyFloat(d);
     }
     over.replaceChildren();
     try {
@@ -738,7 +989,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       stats.drags.push(d.stats);
       stats.last = d.stats;
       opts.onEdit?.(z.edit, v.source);
-      setStatus(doneText(d.target, z), "done", detail());
+      setStatus(message, "done");
     } catch (err) {
       d.abort.abort();
       setStatus(String((err as Error).message ?? err), "err");
@@ -767,7 +1018,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       attached: [],
       hidden: [],
       float: null,
-      plan: [],
       client: { clientX: ev.clientX, clientY: ev.clientY },
       zone: null,
       raf: 0,
@@ -784,6 +1034,12 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       stageRect: null,
       fixed: null,
       fixedShape: "",
+      pointer: ev.pointerType,
+      pivot: start,
+      liftAt: 0,
+      lift: 1,
+      pending: "",
+      overlay: "",
       stats: { kind: target.kind, firstZoneMs: null, allZonesMs: null, arrivals: [], routeMs: [], frameWork: [] },
       onKey: (e) => {
         if (e.key === "Escape") void finish(d, true);
@@ -792,28 +1048,110 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     window.addEventListener("keydown", d.onKey);
     drag = d;
     stats.current = d;
-    canvas.setPointerCapture(ev.pointerId);
-    d.plan = target.kind === "node" ? planNode(zoneContext(), target.id, start) : planEnd(zoneContext(), target, start);
+    stage.setPointerCapture(ev.pointerId);
     d.zone = { kind: target.kind === "node" ? "stay" : "none" };
     hover = null;
-    renderOverlay(d);
-    setStatus(statusFor(d.target, d.zone), "busy");
+    over.replaceChildren();
     d.stats.planMs = performance.now() - d.t0;
     startPreview(d);
   }
 
+  function armConn(conn: Conn | null): void {
+    armed = conn?.id ?? "";
+    hover = conn ? `c${conn.id}` : "";
+    drawHandles(conn, null, null);
+  }
+
+  function beginGesture(ev: PointerEvent): void {
+    const pts = [...touches.values()];
+    if (pts.length >= 2) {
+      const [a, b] = pts as [Point, Point];
+      gesture = {
+        kind: "pinch",
+        id: ev.pointerId,
+        x: (a.x + b.x) / 2,
+        y: (a.y + b.y) / 2,
+        tx,
+        ty,
+        scale,
+        dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      };
+    } else {
+      gesture = { kind: "pan", id: ev.pointerId, x: ev.clientX, y: ev.clientY, tx, ty, scale, dist: 1 };
+    }
+    cancelFlight();
+    hover = null;
+    over.replaceChildren();
+    stage.classList.add("panning");
+  }
+
+  function moveGesture(ev: PointerEvent): void {
+    const g = gesture!;
+    if (g.kind === "pan") {
+      fitted = false;
+      tx = g.tx + ev.clientX - g.x;
+      ty = g.ty + ev.clientY - g.y;
+      keepVisible();
+      applyTransform();
+      return;
+    }
+    const pts = [...touches.values()];
+    if (pts.length < 2) return;
+    const [a, b] = pts as [Point, Point];
+    const r = stage.getBoundingClientRect();
+    const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    const cx = (a.x + b.x) / 2;
+    const cy = (a.y + b.y) / 2;
+    const s = clamp(g.scale * (dist / g.dist), MIN_SCALE, MAX_SCALE);
+    const k = s / g.scale;
+    const px = g.x - r.left;
+    const py = g.y - r.top;
+    fitted = false;
+    moveView({ scale: s, tx: cx - r.left - (px - g.tx) * k, ty: cy - r.top - (py - g.ty) * k });
+    keepVisible();
+    applyTransform();
+  }
+
+  function endGesture(): void {
+    gesture = null;
+    stage.classList.remove("panning");
+  }
+
   function onDown(ev: PointerEvent): void {
-    if (busy || drag || !view || ev.button !== 0) return;
+    if (ev.pointerType === "touch") {
+      touches.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (touches.size >= 2) {
+        if (drag) void finish(drag, true);
+        ev.preventDefault();
+        stage.setPointerCapture(ev.pointerId);
+        beginGesture(ev);
+        return;
+      }
+    }
+    if (busy || drag || !view) return;
+    if (ev.button !== 0 && ev.button !== 1) return;
     ev.preventDefault();
+    if (ev.button === 1 || spaceDown) {
+      stage.setPointerCapture(ev.pointerId);
+      return beginGesture(ev);
+    }
+    const touch = isTouch(ev.pointerType);
     const p = toDiagram(ev);
-    const end = hitEnd(p);
+    const end = hitEnd(p, touch);
     if (end) return beginDrag(ev, { kind: "edgeEnd", edge: end.conn.id, end: end.end });
     const s = hitShape(p);
-    if (s) beginDrag(ev, { kind: "node", id: s.id });
-    else select("");
+    if (s) return beginDrag(ev, { kind: "node", id: s.id });
+    select("");
+    armConn(touch ? nearConn(p, true) : null);
+    if (!touch || !armed) {
+      stage.setPointerCapture(ev.pointerId);
+      beginGesture(ev);
+    }
   }
 
   function onMove(ev: PointerEvent): void {
+    if (touches.has(ev.pointerId)) touches.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (gesture) return moveGesture(ev);
     if (!drag) return onHover(ev);
     const d = drag;
     d.client = { clientX: ev.clientX, clientY: ev.clientY };
@@ -826,18 +1164,35 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     if (d.active) schedule(d);
   }
 
+  function onUp(ev: PointerEvent): void {
+    touches.delete(ev.pointerId);
+    if (gesture) {
+      if (gesture.kind === "pinch" && touches.size === 1) {
+        const [rest] = [...touches.entries()] as [[number, Point]];
+        gesture = { kind: "pan", id: rest[0], x: rest[1].x, y: rest[1].y, tx, ty, scale, dist: 1 };
+        return;
+      }
+      if (touches.size === 0 || gesture.kind === "pan") endGesture();
+      return;
+    }
+    if (drag) void finish(drag, ev.type === "pointercancel");
+  }
+
+  function wheel(ev: WheelEvent): void {
+    ev.preventDefault();
+    if (drag || busy) return;
+    const unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? stage.clientHeight : 1;
+    if (ev.ctrlKey || ev.metaKey) {
+      zoomAt(scale * Math.exp(-clamp(ev.deltaY * unit, -60, 60) * 0.01), ev.clientX, ev.clientY);
+    } else {
+      panBy(-ev.deltaX * unit, -ev.deltaY * unit);
+    }
+  }
+
   function select(id: string): void {
     selected = id;
+    drawSelection();
     emit("select", id);
-  }
-
-  function detail(): string {
-    return view ? `v${view.version} · ${view.shapes.length} shapes · layout ${view.layoutMs.toFixed(0)} ms` : "";
-  }
-
-  function statusLine(): string {
-    if (!view) return "Loading…";
-    return opts.hint?.() ?? "Drag a box to move it, or drag the end of an arrow to reconnect it";
   }
 
   function tweenEl(node: Element, from: Point, ms = TWEEN_MS): Animation | null {
@@ -859,7 +1214,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
 
   function applyView(v: View, floats: { target: Target; cur: { dx: number; dy: number } } | null = null): void {
     if (v.error) {
-      setStatus(v.error, "err");
+      emit("error", v.error);
       if (!view || v.version > view.version) view = { ...(view ?? v), error: v.error, version: v.version };
       return;
     }
@@ -867,6 +1222,8 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     const prev = view;
     if (!prev || (prev.error && !prev.svg) || v.cause === "open" || !outer || !inner) {
       view = v;
+      selected = "";
+      armed = "";
       mountFresh(v);
       fit();
       finishApply(prev, v);
@@ -947,7 +1304,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     for (const n of inner.querySelectorAll(':scope > g[data-moving="1"]')) inner.appendChild(n);
     indexView(v);
     const finished = animations.filter((a): a is Animation => !!a).map((a) => a.finished.catch(() => {}));
-    orderTarget = p.inner;
+    orderTarget = desired.map((x) => x.cls);
     void Promise.all(finished).then(settleOrder);
     setTimeout(settleOrder, 1500);
     finishApply(prev, v);
@@ -956,7 +1313,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   function settleOrder(): void {
     const target = orderTarget;
     if (!target || !inner) return;
-    const want = Array.from(target.children).map((c) => groups.get(c.getAttribute("class") ?? "") ?? null);
+    const want = target.map((c) => groups.get(c) ?? null);
     const present = want.filter((n): n is Element => !!n);
     const cur = Array.from(inner.children).filter((n) => present.includes(n));
     if (cur.some((n, i) => n !== present[i])) for (const n of present) inner.insertBefore(n, inner.querySelector(":scope > mask"));
@@ -966,8 +1323,11 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   function finishApply(prev: View | null, v: View): void {
     hover = null;
     over.replaceChildren();
+    if (selected && !shapes.has(selected)) selected = "";
+    drawSelection();
+    emit("error", null);
     emit("view", v, prev);
-    setStatus(statusLine(), "", detail());
+    if (prev && fitted && v.cause !== "open") window.setTimeout(() => fitted && !drag && !busy && fit(true), 320);
   }
 
   async function refresh(): Promise<void> {
@@ -989,7 +1349,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     try {
       const v = await engine[kind]();
       applyView(v);
-      setStatus(kind === "undo" ? "Undone" : "Redone", "done", detail());
+      setStatus(kind === "undo" ? "Undone" : "Redone", "done");
     } catch (err) {
       setStatus(String((err as Error).message ?? err), "err");
     } finally {
@@ -1005,7 +1365,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     try {
       const v = await engine.commit(edit, view.version);
       applyView(v);
-      setStatus(edit.kind === "direction" ? "Layout direction changed" : "Positions cleared", "done", detail());
+      setStatus(edit.kind === "direction" ? "Layout direction changed" : "Layout reset", "done");
     } catch (err) {
       setStatus(String((err as Error).message ?? err), "err");
     } finally {
@@ -1022,31 +1382,52 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
   });
 
-  canvas.addEventListener("pointerdown", onDown);
-  canvas.addEventListener("pointermove", onMove);
-  canvas.addEventListener("pointerup", () => {
-    if (drag) void finish(drag, false);
-  });
-  canvas.addEventListener("pointercancel", () => {
-    if (drag) void finish(drag, true);
-  });
-  canvas.addEventListener("pointerleave", () => {
-    if (!drag) {
+  stage.addEventListener("pointerdown", onDown);
+  stage.addEventListener("pointermove", onMove);
+  stage.addEventListener("pointerup", onUp);
+  stage.addEventListener("pointercancel", onUp);
+  stage.addEventListener("wheel", wheel, { passive: false });
+  stage.addEventListener("pointerleave", () => {
+    if (!drag && !gesture) {
       hover = null;
-      over.replaceChildren();
+      if (!armed) over.replaceChildren();
     }
   });
-  canvas.addEventListener("dblclick", (ev) => {
-    if (!view || busy) return;
-    const s = hitShape(toDiagram(ev));
+  stage.addEventListener("dblclick", (ev) => {
+    if (!view || busy || drag) return;
+    const p = toDiagram(ev);
+    const s = hitShape(p);
     if (s?.pinned) void send({ kind: "unpin", key: s.id });
+    else if (!s && !nearConn(p)) fit(true);
   });
+  const typing = (target: EventTarget | null): boolean => /input|textarea|select/i.test((target as HTMLElement | null)?.tagName ?? "");
   window.addEventListener("keydown", (e) => {
+    if (typing(e.target)) return;
     const key = e.key.toLowerCase();
-    if (!(e.metaKey || e.ctrlKey) || (key !== "z" && key !== "y")) return;
-    if (/input|textarea/i.test((e.target as HTMLElement | null)?.tagName ?? "")) return;
-    e.preventDefault();
-    void history(key === "y" || e.shiftKey ? "redo" : "undo");
+    if (e.metaKey || e.ctrlKey) {
+      if (key !== "z" && key !== "y") return;
+      e.preventDefault();
+      void history(key === "y" || e.shiftKey ? "redo" : "undo");
+      return;
+    }
+    if (e.altKey) return;
+    if (key === "f") fit(true);
+    else if (key === "escape" && !drag && selected) select("");
+    else if (key === " " && !spaceDown && (e.target === document.body || stage.contains(e.target as Node))) {
+      spaceDown = true;
+      stage.classList.add("hand");
+      e.preventDefault();
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key === " ") {
+      spaceDown = false;
+      stage.classList.remove("hand");
+    }
+  });
+  window.addEventListener("blur", () => {
+    spaceDown = false;
+    stage.classList.remove("hand");
   });
 
   void refresh();
@@ -1066,8 +1447,15 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     send,
     fit,
     setScale,
+    zoomBy,
+    setInsets,
+    reveal,
+    label: labelOf,
     get scale() {
       return scale;
+    },
+    get fitted() {
+      return fitted;
     },
     get view() {
       return view;
@@ -1086,6 +1474,5 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
       return toScreen(slot.at);
     },
     shape: (id) => shapes.get(id),
-    statusLine,
   };
 }

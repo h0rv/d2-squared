@@ -74,3 +74,10 @@ export type PreviewMessage = { candidate: Candidate } | { done: true; count: num
 export interface RouteResult {
   paths: Path[] | null;
 }
+
+export interface PendingChange {
+  title: string;
+  lines?: DiffLine[];
+  working?: boolean;
+  saved?: number;
+}
