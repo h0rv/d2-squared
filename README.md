@@ -1,12 +1,17 @@
 # D2²
 
-D2² (D2 squared) lets you fix a [D2](https://d2lang.com) diagram by dragging. Move a box into a group, drag the end of an arrow onto another box, or place a box where you want it. Each drag becomes a small edit to your `.d2` file, so the file stays the source of truth. The site has small examples to drag, e.g., an org chart where you give someone a new manager.
+D2² (D2 squared) is D2 × D2. It combines two projects that are both called D2.
+
+- [D2](https://d2lang.com) is a language for writing diagrams as text.
+- [Declarative Dragging](https://declarative-dragging.github.io/), also called D2, is a new way to build drag and drop, from a UIST 2026 paper by Horowitz, Blinn and Heer. You describe the states a drag can lead to, and the drop zones come from those states.
+
+Together they make D2 diagrams draggable. You can move a box into a group, drag the end of an arrow onto another box, or place a box where you want it. Each drag is saved as a small edit to your `.d2` file, so the text stays the source of truth.
 
 ![D2 squared moving a box into a group](docs/screenshot.png)
 
 ## Try it
 
-- Open the site: https://h0rv.github.io/d2-squared/. Nothing to install. It runs in your browser.
+- Open the site: https://horv.co/d2-squared/. Nothing to install. It runs in your browser.
 - Or edit a file on your machine:
 
 ```sh
@@ -31,9 +36,9 @@ Work is split into steps so the drag never waits.
 
 Boxes you did not touch keep their place. D2² saves their positions as `top` and `left` in the file, so a fresh layout matches what you saw. See [docs/DESIGN.md](docs/DESIGN.md) for details.
 
-## Relation to Declarative Dragging
+## How it uses Declarative Dragging
 
-The idea comes from the paper [Declarative Dragging](https://declarative-dragging.github.io/) (Horowitz, Blinn and Heer, UIST 2026). You list the states a drag can lead to, and the drop zones come from where the dragged item lands in each state. Their library, dragology, is for React and needs each state to render at once. D2 layouts take longer, so D2² uses its own small drag loop.
+In D2², each drag state is a version of the `.d2` file, e.g., the file with a box moved into another group. D2² lays out each version and shows a drop zone where the box lands. The paper's library, dragology, is for React and needs each state to render at once. D2 layouts take longer, so D2² has its own small drag loop that follows the same idea.
 
 ## Limits
 

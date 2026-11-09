@@ -1,6 +1,6 @@
 # Design
 
-D2 turns text into a diagram. Getting it 80 percent right is easy. The last 20 percent is hard: a table in the wrong place, a service in the wrong group, an arrow that points at the wrong box. D2 squared lets you fix these by dragging. Each drag becomes a small edit to the `.d2` file.
+D2 squared combines D2, the diagram language, with Declarative Dragging, a way to build drag and drop from a UIST 2026 paper. The result is D2 diagrams that you can drag. Each drag is saved as a small edit to the `.d2` file.
 
 ## Rules
 
