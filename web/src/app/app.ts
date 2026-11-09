@@ -182,7 +182,7 @@ function wireSiteControls(engine: Engine, editor: Editor, hint: { current: strin
 
 export async function start(): Promise<void> {
   const base = import.meta.env.BASE_URL;
-  const info = await probeServe(base);
+  const info = import.meta.env.MODE === "production" ? null : await probeServe(base);
   const hint = { current: DEFAULT_HINT };
   const engine: Engine = info ? new HttpEngine(base) : await createWasmEngine();
   const editor = mount($("editor"), engine, { hint: () => hint.current });
