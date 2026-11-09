@@ -547,3 +547,99 @@ func TestSignatureDrags(t *testing.T) {
 		}
 	})
 }
+
+func directPins(t *testing.T, source, parent string) map[string][2]int {
+	t.Helper()
+	g, err := compile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string][2]int{}
+	for _, o := range g.Objects {
+		if parentID(o.AbsID()) == parent && o.Left != nil && o.Top != nil {
+			out[o.AbsID()] = [2]int{atoi(o.Left.Value), atoi(o.Top.Value)}
+		}
+	}
+	return out
+}
+
+func minPin(pins map[string][2]int) (int, int) {
+	l, tp := math.MaxInt, math.MaxInt
+	for _, p := range pins {
+		l, tp = min(l, p[0]), min(tp, p[1])
+	}
+	return l, tp
+}
+
+func TestGroupsHugTheirChildren(t *testing.T) {
+	h := newHarness(t, "testdata/arch.d2")
+	before := h.shapes()
+	services := before["services"]
+	notifier := before["services.notifier"]
+	v := h.mustCommit(Edit{Kind: "pin", Key: "services.notifier",
+		Left: services.X + services.Width - notifier.Width - containerPad, Top: notifier.Y})
+	pins := directPins(t, h.src, "services")
+	if len(pins) < 5 {
+		t.Fatalf("every child of services should be pinned:\n%s", h.src)
+	}
+	if l, top := minPin(pins); l != 0 || top != 0 {
+		t.Fatalf("children should start at the inner padding, got min left %d top %d:\n%s", l, top, h.src)
+	}
+	after := v.Layout.shapeMap()
+	if after["services"].Width >= services.Width {
+		t.Fatalf("services should shrink: %d -> %d", services.Width, after["services"].Width)
+	}
+	if after["services"].X != services.X || after["services"].Y != services.Y {
+		t.Fatalf("services moved: %+v -> %+v", services, after["services"])
+	}
+	for _, id := range []string{"idp", "data", "edge"} {
+		if after[id].X != before[id].X || after[id].Y != before[id].Y {
+			t.Fatalf("%s moved: %+v -> %+v", id, before[id], after[id])
+		}
+	}
+	h.noDrift()
+}
+
+func TestPreviewMatchesTheCommitWhenGroupsHug(t *testing.T) {
+	h := newHarness(t, "testdata/arch.d2")
+	services := h.shapes()["services"]
+	notifier := h.shapes()["services.notifier"]
+	e := Edit{Kind: "pin", Key: "services.notifier", Left: services.X + services.Width - notifier.Width - containerPad, Top: notifier.Y}
+	c, err := h.session.Candidate(h.ctx(), e, h.view().Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := h.mustCommit(e)
+	a, b := c.layout.shapeMap()["services"], v.Layout.shapeMap()["services"]
+	if a.X != b.X || a.Y != b.Y || a.Width != b.Width || a.Height != b.Height || c.source != h.src {
+		t.Fatal("the preview should equal the result")
+	}
+}
+
+func skewedRoutes(l *Layout) []string {
+	var bad []string
+	for _, c := range l.Conns {
+		for i := 1; i < len(c.Route); i++ {
+			a, b := c.Route[i-1], c.Route[i]
+			if math.Abs(a[0]-b[0]) > 1 && math.Abs(a[1]-b[1]) > 1 {
+				bad = append(bad, c.ID)
+				break
+			}
+		}
+	}
+	return bad
+}
+
+func TestRoutesStayOrthogonalAfterHugging(t *testing.T) {
+	h := newHarness(t, "../examples/architecture.d2")
+	v := h.mustCommit(Edit{Kind: "move", Key: "services.billing", To: "data"})
+	if bad := skewedRoutes(v.Layout); len(bad) != 0 {
+		t.Fatalf("diagonal arrows after the move: %v", bad)
+	}
+	files, _ := filepath.Glob("../examples/*.d2")
+	for _, f := range files {
+		if bad := skewedRoutes(newHarness(t, f).view().Layout); len(bad) != 0 {
+			t.Fatalf("%s has diagonal arrows: %v", f, bad)
+		}
+	}
+}

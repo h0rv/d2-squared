@@ -19,12 +19,14 @@ import (
 const containerPad = 60
 
 type Edit struct {
-	Kind string `json:"kind"`
-	Key  string `json:"key"`
-	To   string `json:"to"`
-	End  string `json:"end"`
-	Left int    `json:"left"`
-	Top  int    `json:"top"`
+	Kind   string `json:"kind"`
+	Key    string `json:"key"`
+	To     string `json:"to"`
+	End    string `json:"end"`
+	Left   int    `json:"left"`
+	Top    int    `json:"top"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 type Point struct {
@@ -346,6 +348,56 @@ func unpinSingle(source, id string, sized map[string]bool) (string, error) {
 	}
 	if g, err = unpinOne(g, id, sized[id]); err != nil {
 		return "", err
+	}
+	return format(g), nil
+}
+
+func hug(source string, sized map[string]bool) (string, error) {
+	g, err := compile(source)
+	if err != nil {
+		return "", err
+	}
+	type pin struct {
+		id        string
+		left, top int
+	}
+	var moves []pin
+	for _, c := range g.Objects {
+		if len(c.ChildrenArray) == 0 || sized[c.AbsID()] {
+			continue
+		}
+		var kids []pin
+		for _, k := range c.ChildrenArray {
+			if k.Left == nil || k.Top == nil {
+				continue
+			}
+			l, errL := strconv.Atoi(k.Left.Value)
+			t, errT := strconv.Atoi(k.Top.Value)
+			if errL == nil && errT == nil {
+				kids = append(kids, pin{k.AbsID(), l, t})
+			}
+		}
+		if len(kids) == 0 {
+			continue
+		}
+		minL, minT := kids[0].left, kids[0].top
+		for _, k := range kids {
+			minL, minT = min(minL, k.left), min(minT, k.top)
+		}
+		if minL == 0 && minT == 0 {
+			continue
+		}
+		for _, k := range kids {
+			moves = append(moves, pin{k.id, k.left - minL, k.top - minT})
+		}
+	}
+	if len(moves) == 0 {
+		return source, nil
+	}
+	for _, m := range moves {
+		if g, err = setFields(g, m.id, [][2]string{{"left", strconv.Itoa(m.left)}, {"top", strconv.Itoa(m.top)}}); err != nil {
+			return "", err
+		}
 	}
 	return format(g), nil
 }

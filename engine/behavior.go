@@ -27,6 +27,26 @@ type Candidate struct {
 
 	layout *Layout
 	source string
+	landID string
+}
+
+func (c *Candidate) hugGroups(ctx context.Context, sized map[string]bool) error {
+	hugged, err := hug(c.source, sized)
+	if err != nil || hugged == c.source {
+		return err
+	}
+	layout, err := layoutWith(ctx, hugged, talaLayout(previewSeeds))
+	if err != nil {
+		return err
+	}
+	if layout, err = markPinned(layout, hugged); err != nil {
+		return err
+	}
+	c.source, c.layout = hugged, layout
+	if s, ok := layout.shape(c.landID); ok {
+		c.Landing = s
+	}
+	return nil
 }
 
 type Behavior interface {
@@ -172,7 +192,7 @@ func (reparent) Build(ctx context.Context, base *Layout, source string, e Edit) 
 		label = "to top level"
 	}
 	return &Candidate{Label: label, Edit: e, Landing: landing, Diff: diffLines(source, clean, 1),
-		PinLines: countAdded(clean, final), layout: layout, source: final}, nil
+		PinLines: countAdded(clean, final), layout: layout, source: final, landID: newID}, nil
 }
 
 type reconnect struct{}
@@ -243,6 +263,7 @@ func (reconnect) Build(ctx context.Context, base *Layout, source string, e Edit)
 	cand := &Candidate{Label: e.End + " to " + e.To, Edit: e, Diff: diffLines(source, clean, 1),
 		PinLines: countAdded(clean, pinned), layout: layout, source: pinned}
 	cand.Landing, _ = base.shape(table)
+	cand.landID = table
 	for _, c := range layout.Conns {
 		if c.Src == src && c.Dst == dst {
 			cand.Route = c.Route
@@ -291,7 +312,7 @@ func (pin) Build(ctx context.Context, base *Layout, source string, e Edit) (*Can
 	landing, _ := layout.shape(e.Key)
 	return &Candidate{Label: "pin " + e.Key, Edit: e, Landing: landing,
 		Diff:     []DiffLine{{Op: "+", Text: "left: " + strconv.Itoa(e.Left)}, {Op: "+", Text: "top: " + strconv.Itoa(e.Top)}},
-		PinLines: countAdded(source, pinned), layout: layout, source: pinned}, nil
+		PinLines: countAdded(source, pinned), layout: layout, source: pinned, landID: e.Key}, nil
 }
 
 type direction struct{}

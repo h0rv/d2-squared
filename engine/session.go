@@ -223,7 +223,11 @@ func (s *Session) compute(ctx context.Context, v View, e Edit, key string) (*Can
 	if err != nil {
 		return nil, err
 	}
-	c.layout.userSized = remapSized(v.Layout.userSized, e)
+	sized := remapSized(v.Layout.userSized, e)
+	if err := c.hugGroups(ctx, sized); err != nil {
+		return nil, err
+	}
+	c.layout.userSized = sized
 	c.Key = e.ID()
 	c.MS = float64(time.Since(started).Microseconds()) / 1000
 	s.cachePut(key, c)

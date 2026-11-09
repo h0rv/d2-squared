@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"math"
 	"sync"
 	"time"
 
@@ -69,8 +70,33 @@ func talaLayout(seeds []int64) layoutFn {
 		if len(seeds) > 0 {
 			o.Seeds = seeds
 		}
-		return d2talalayout.Layout(ctx, g, &o)
+		if err := d2talalayout.Layout(ctx, g, &o); err != nil {
+			return err
+		}
+		return squareUp(ctx, g)
 	}
+}
+
+func skewed(route []*geo.Point) bool {
+	for i := 1; i < len(route); i++ {
+		if math.Abs(route[i].X-route[i-1].X) > 1 && math.Abs(route[i].Y-route[i-1].Y) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func squareUp(ctx context.Context, g *d2graph.Graph) error {
+	var bad []*d2graph.Edge
+	for _, e := range g.Edges {
+		if !e.IsCurve && skewed(e.Route) {
+			bad = append(bad, e)
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return d2talalayout.RouteEdges(ctx, g, bad)
 }
 
 func layoutWith(ctx context.Context, source string, layout layoutFn) (*Layout, error) {
