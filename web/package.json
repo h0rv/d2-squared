@@ -15,7 +15,9 @@
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
     "test:serve": "playwright test --project=serve",
-    "test:wasm": "playwright test --project=wasm"
+    "test:wasm": "playwright test --project=wasm",
+    "test:chrome": "playwright test --project=wasm --project=serve",
+    "test:firefox": "playwright test --project=wasm-firefox --project=serve-firefox"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",

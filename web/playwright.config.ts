@@ -1,19 +1,23 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
+const viewport = { width: 1500, height: 950 };
 const channel = process.env["PW_CHANNEL"];
+const chromium = channel ? { channel } : {};
+const firefox = { ...devices["Desktop Firefox"], viewport };
+const baseURL = "http://127.0.0.1:8802";
 
 export default defineConfig({
   testDir: "tests",
   timeout: 180_000,
   workers: 1,
+  outputDir: "test-results/pw",
   reporter: [["list"]],
-  use: {
-    viewport: { width: 1500, height: 950 },
-    ...(channel ? { channel } : {}),
-  },
+  use: { viewport },
   projects: [
-    { name: "wasm", testMatch: "wasm.spec.ts", use: { baseURL: "http://127.0.0.1:8802" } },
-    { name: "serve", testMatch: "serve.spec.ts" },
+    { name: "wasm", testMatch: "wasm.spec.ts", use: { baseURL, ...chromium } },
+    { name: "serve", testMatch: "serve.spec.ts", use: chromium },
+    { name: "wasm-firefox", testMatch: "wasm.spec.ts", use: { ...firefox, baseURL } },
+    { name: "serve-firefox", testMatch: "serve.spec.ts", use: firefox },
   ],
   webServer: {
     command: "npx vite preview --host 127.0.0.1 --port 8802 --strictPort",
