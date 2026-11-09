@@ -60,6 +60,7 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
   await d.setScale(0.55);
   await sleep(200);
 
+  await d.openCode();
   const data = await d.mustShape("data");
   let live: { paths: string[]; labels: (string | null)[]; originalHidden: boolean } | null = null;
   let r = await d.drag(await d.center("services.billing"), await d.at(data.x + 40, data.y + 80), {
@@ -76,9 +77,15 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
   expect(live!.paths.some((p) => / S /.test(p))).toBe(true);
   expect(live!.labels).toContain("events");
   expect(live!.originalHidden).toBe(true);
-  expect(r.zonesAtDown.zones).toBeGreaterThanOrEqual(4);
-  expect(r.status).toMatch(/move billing into data/);
+  expect(r.dashed).toBe(0);
+  expect(r.status).toMatch(/^Move into data$/i);
   expect(r.diff).toMatch(/\+/);
+  expect(await page.locator("#filename").textContent()).toContain("diagram.d2");
+  await expect(page.locator("#examples")).toBeHidden();
+  await page.click("#more");
+  await expect(page.locator("#open")).toBeHidden();
+  await expect(page.locator("#reset")).toBeVisible();
+  await page.keyboard.press("Escape");
   expect(served.source()).toMatch(/^data: \{[\s\S]*?billing: Billing Service[\s\S]*?^\}/m);
   expect(await d.shape("data.billing")).not.toBeNull();
 
@@ -153,8 +160,8 @@ test("serve: large ERD pin, column reconnect, early drop and autoscroll", async 
   const rh = customers.height / (cols.length + 1);
   const drop = await d.at(customers.x + customers.width / 2, customers.y + rh * (row + 1.5));
   const rc = await d.drag(await d.end(eid, "dst"), drop);
-  expect(rc.zonesAtDown.zones).toBeGreaterThanOrEqual(12);
-  expect(rc.zonesAtDown.prov).toBe(rc.zonesAtDown.zones);
+  expect(rc.dashed).toBe(0);
+  expect(rc.status).toMatch(/^Connect to /);
   expect(served.source()).toMatch(new RegExp(`-> customers\\.${cols[row]}\\b`));
 
   const eid2 = await d.edgeId("payments", "orders");
@@ -171,22 +178,18 @@ test("serve: large ERD pin, column reconnect, early drop and autoscroll", async 
   await d.setScale(0.35);
   await sleep(300);
   const team = await d.center("products");
-  const stageRect = await page.evaluate(() => {
-    const rect = document.querySelector(".d2-stage")!.getBoundingClientRect();
-    return { right: rect.right, bottom: rect.bottom };
-  });
-  const startScroll = await page.evaluate(() => {
-    const s = document.querySelector(".d2-stage")!;
-    return [s.scrollLeft, s.scrollTop] as const;
-  });
+  const stageRect = await page.evaluate(() => ({ right: window.innerWidth, bottom: window.innerHeight }));
+  const canvasAt = () =>
+    page.evaluate(() => {
+      const box = document.querySelector(".d2-canvas")!.getBoundingClientRect();
+      return [box.left, box.top] as const;
+    });
+  const startScroll = await canvasAt();
   await d.drag(team, { x: stageRect.right - 12, y: stageRect.bottom - 12 }, { release: false, hold: false });
   await sleep(700);
-  const scrolled = await page.evaluate(() => {
-    const s = document.querySelector(".d2-stage")!;
-    return [s.scrollLeft, s.scrollTop] as const;
-  });
+  const scrolled = await canvasAt();
   await d.cancelDrag();
-  expect(scrolled[0] - startScroll[0] > 50 || scrolled[1] - startScroll[1] > 50).toBe(true);
+  expect(startScroll[0] - scrolled[0] > 50 || startScroll[1] - scrolled[1] > 50).toBe(true);
   d.noErrors();
 });
 

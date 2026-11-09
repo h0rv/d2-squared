@@ -14,7 +14,8 @@ export interface DragOptions {
 export interface DragResult {
   status: string;
   diff: string;
-  zonesAtDown: { zones: number; prov: number; ms: number };
+  dashed: number;
+  highlighted: number;
   frames: number[];
   stats: DragStats | null;
 }
@@ -34,9 +35,13 @@ export class Diagram {
   }
 
   ready(timeout = 60_000): Promise<unknown> {
-    return this.page.waitForFunction(() => !!window.editor?.view?.svg && !document.getElementById("loading")?.offsetParent, null, {
-      timeout,
-    });
+    return this.page.waitForFunction(
+      () => !!window.editor?.view?.svg && !!document.body.dataset["ready"] && !document.getElementById("loading")?.offsetParent,
+      null,
+      {
+        timeout,
+      },
+    );
   }
 
   setScale(scale: number): Promise<void> {
@@ -44,19 +49,24 @@ export class Diagram {
   }
 
   async center(id: string): Promise<Point> {
-    await this.page.evaluate((i) => {
-      const stage = document.querySelector(".d2-stage")!;
-      const r = stage.getBoundingClientRect();
-      const c = window.editor!.screenCenter(i);
-      stage.scrollLeft += Math.max(0, c.x - (r.right - 120)) - Math.max(0, r.left + 120 - c.x);
-      stage.scrollTop += Math.max(0, c.y - (r.bottom - 120)) - Math.max(0, r.top + 120 - c.y);
-    }, id);
+    await this.hasShape(id);
+    await this.page.evaluate((i) => window.editor!.reveal(i), id);
     await this.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     return this.page.evaluate((i) => window.editor!.screenCenter(i), id);
   }
 
+  async openCode(): Promise<void> {
+    if ((await this.page.locator("#code-toggle").getAttribute("aria-pressed")) !== "true") await this.page.click("#code-toggle");
+    await this.page.locator("#code").waitFor({ state: "visible" });
+    await sleep(400);
+  }
+
   at(x: number, y: number): Promise<Point> {
     return this.page.evaluate(([a, b]) => window.editor!.screenPoint(a!, b!), [x, y] as const);
+  }
+
+  hasShape(id: string): Promise<unknown> {
+    return this.page.waitForFunction((i) => !!window.editor?.shape(i), id, { timeout: 60_000 });
   }
 
   shape(id: string) {
@@ -64,6 +74,7 @@ export class Diagram {
   }
 
   async mustShape(id: string) {
+    await this.hasShape(id);
     const s = await this.shape(id);
     expect(s, `shape ${id}`).not.toBeNull();
     return s!;
@@ -73,11 +84,14 @@ export class Diagram {
     return this.page.evaluate(() => Object.fromEntries(window.editor!.view!.shapes.map((s) => [s.id, [s.x, s.y] as [number, number]])));
   }
 
-  edgeId(src: string, dst: string): Promise<string> {
-    return this.page.evaluate(([a, b]) => window.editor!.view!.conns.find((c) => c.src === a && c.dst === b)!.id, [src, dst] as const);
+  async edgeId(src: string, dst: string): Promise<string> {
+    const find = ([a, b]: readonly [string, string]) => window.editor?.view?.conns.find((c) => c.src === a && c.dst === b)?.id ?? null;
+    await this.page.waitForFunction(find, [src, dst] as const, { timeout: 60_000 });
+    return (await this.page.evaluate(find, [src, dst] as const))!;
   }
 
-  end(edge: string, which: "src" | "dst"): Promise<Point> {
+  async end(edge: string, which: "src" | "dst"): Promise<Point> {
+    await this.page.waitForFunction((e) => !!window.editor?.view?.conns.some((c) => c.id === e), edge, { timeout: 60_000 });
     return this.page.evaluate(([e, w]) => window.editor!.endScreen(e, w), [edge, which] as const);
   }
 
@@ -106,14 +120,7 @@ export class Diagram {
     });
     if (alt) await page.keyboard.down("Alt");
     await page.mouse.move(from.x, from.y);
-    const downAt = Date.now();
     await page.mouse.down();
-    const zonesAtDown = await page.evaluate(() => ({
-      zones: document.querySelectorAll(".d2-over .zone").length,
-      prov: document.querySelectorAll(".d2-over .zone.prov").length,
-      ms: 0,
-    }));
-    zonesAtDown.ms = Date.now() - downAt;
     for (let i = 1; i <= steps; i++) {
       await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
       await sleep(12);
@@ -122,10 +129,15 @@ export class Diagram {
     await sleep(250);
     await options.afterZones?.();
     const mid = await page.evaluate(() => {
-      const diff = document.querySelector<HTMLElement>(".d2-diff")!;
-      return { status: document.getElementById("status")!.textContent ?? "", diff: diff.hidden ? "" : diff.innerText };
+      const pending = document.querySelector<HTMLElement>("#code.pending #code-lines");
+      return {
+        status: document.querySelector<HTMLElement>(".d2-tip:not([hidden])")?.textContent ?? "",
+        diff: pending ? pending.innerText : "",
+        dashed: document.querySelectorAll(".d2-over .prov, .d2-over [stroke-dasharray]").length,
+        highlighted: document.querySelectorAll(".d2-over .target, .d2-over .landing").length,
+      };
     });
-    if (!release) return { status: mid.status, diff: mid.diff, zonesAtDown, frames: [], stats: null };
+    if (!release) return { ...mid, frames: [], stats: null };
     await page.mouse.up();
     if (alt) await page.keyboard.up("Alt");
     await sleep(100);
@@ -136,7 +148,7 @@ export class Diagram {
       w.stopFrames = true;
       return { frames: w.frames.slice(2), last: window.d2Stats?.last ?? null };
     });
-    return { status: mid.status, diff: mid.diff, zonesAtDown, frames: done.frames, stats: done.last };
+    return { ...mid, frames: done.frames, stats: done.last };
   }
 
   async cancelDrag(): Promise<void> {

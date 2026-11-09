@@ -17,15 +17,10 @@ async function open(page: Page, example: string, query = ""): Promise<{ diagram:
   const diagram = new Diagram(page);
   await diagram.ready();
   if (example !== "architecture") {
-    await page.selectOption("#example", example);
-    await page.waitForFunction(
-      (id) =>
-        document.getElementById("example") instanceof HTMLSelectElement &&
-        (document.getElementById("example") as HTMLSelectElement).value === id,
-      example,
-    );
+    await page.click(`[data-example="${example}"]`);
+    await page.waitForFunction((id) => document.querySelector(`[data-example="${id}"]`)?.getAttribute("aria-checked") === "true", example);
     await page.waitForFunction(() => !!window.editor?.view?.svg);
-    await sleep(500);
+    await sleep(800);
   }
   const loadMs = Date.now() - started;
   await diagram.setScale(0.6);
@@ -127,12 +122,12 @@ test("wasm: dark mode keeps fills and undo restores the file", async ({ browser 
 test("wasm: editing the source and sharing a link", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await open(page, "architecture");
-  await page.click("#edit");
-  await page.fill("#source-edit", "a: Alpha\nb: Beta\na -> b\n");
-  await page.click("#apply");
+  await page.click("#code-toggle");
+  await page.fill("#code-input", "a: Alpha\nb: Beta\na -> b\n");
   await page.waitForFunction(() => window.editor?.view?.shapes.length === 2);
-  await page.click("#more summary");
+  await page.click("#more");
   await page.click("#share");
+  await expect(page.locator("#toast")).toContainText("Link copied");
   await sleep(500);
   const url = page.url();
   expect(url).toContain("#s=");
@@ -152,4 +147,70 @@ test("wasm: helper workers lay out zones in parallel", async ({ page }) => {
   const result = await diagram.drag(end, target);
   expect(result.status).toBeTruthy();
   expect(await diagram.source()).toMatch(/services\.orders -> data\.cache/);
+});
+
+test("wasm: the code panel is hidden at first and toggles", async ({ page }) => {
+  await open(page, "architecture");
+  await expect(page.locator("#code")).toBeHidden();
+  await page.click("#code-toggle");
+  await expect(page.locator("#code")).toBeVisible();
+  await expect(page.locator("#code-lines .ln").first()).toBeVisible();
+  await page.click("#code-close");
+  await expect(page.locator("#code")).toBeHidden();
+});
+
+for (const size of [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`wasm: the whole diagram is visible at ${size.width}x${size.height}`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: size, hasTouch: size.width < 700 });
+    const page = await context.newPage();
+    const diagram = new Diagram(page);
+    await page.goto(PAGE);
+    await diagram.ready();
+    await sleep(500);
+    const inside = async (height = size.height) => {
+      const box = await page.evaluate(() => {
+        const r = document.querySelector(".d2-svg > svg")!.getBoundingClientRect();
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      });
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.top).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(size.width);
+      expect(box.bottom).toBeLessThanOrEqual(height);
+    };
+    await inside();
+    await page.setViewportSize({ width: size.width, height: size.height - 120 });
+    await sleep(400);
+    await inside(size.height - 120);
+    await context.close();
+  });
+}
+
+test("wasm: the hint fades after the first drag and stays hidden", async ({ page }) => {
+  const { diagram } = await open(page, "architecture");
+  await expect(page.locator("#hint")).toBeVisible();
+  const data = await diagram.mustShape("data");
+  await diagram.drag(await diagram.center("services.billing"), await diagram.at(data.x + 40, data.y + 80));
+  await expect(page.locator("#hint")).toBeHidden();
+  await page.reload();
+  await diagram.ready();
+  await expect(page.locator("#hint")).toBeHidden();
+});
+
+test("wasm: a toast follows a drop and nothing dashed shows during the drag", async ({ page }) => {
+  const { diagram } = await open(page, "architecture");
+  await diagram.openCode();
+  const data = await diagram.mustShape("data");
+  const result = await diagram.drag(await diagram.center("services.billing"), await diagram.at(data.x + 40, data.y + 80));
+  expect(result.status).toBe("Move into Data");
+  expect(result.dashed).toBe(0);
+  expect(result.highlighted).toBeGreaterThanOrEqual(1);
+  expect(result.diff).toMatch(/\+/);
+  await expect(page.locator("#toast")).toContainText("Moved Billing into Data");
+  await expect(page.locator("#toast")).toContainText("Undo");
+  await expect(page.locator("#code-lines .ln.hl").first()).toBeAttached();
+  await expect(page.locator("#code-lines .ln.pos").first()).toBeVisible();
+  await expect(page.locator("#toast")).toBeHidden({ timeout: 8000 });
 });
