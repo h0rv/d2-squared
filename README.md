@@ -1,13 +1,11 @@
-<img src="docs/logo.svg" alt="D2 squared logo" height="64">
+# D2²
 
 ![Fixing a diagram by dragging a box into a group and an arrow onto another box in D2 squared](docs/demo.gif)
 
-# D2²
-
 D2² (D2 squared) is D2 × D2. It combines two projects that are both called D2.
 
-- [D2](https://d2lang.com) is a language for writing diagrams as text.
-- [Declarative Dragging](https://declarative-dragging.github.io/), also called D2, is a new way to build drag and drop, from a UIST 2026 paper by Horowitz, Blinn and Heer. You describe the states a drag can lead to, and the drop zones come from those states.
+- [D2](https://d2lang.com), short for Declarative Diagramming, is a language for writing diagrams as text.
+- [Declarative Dragging](https://declarative-dragging.github.io/), also shortened to D2, is a new way to build drag and drop, from a UIST 2026 paper by Horowitz, Blinn and Heer. You describe the states a drag can lead to, and the drop zones come from those states.
 
 Together they make D2 diagrams draggable. You can move a box into a group, drag the end of an arrow onto another box, or place a box where you want it. Each drag is saved as a small edit to your `.d2` file, so the text stays the source of truth.
 
