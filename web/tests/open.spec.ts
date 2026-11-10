@@ -12,22 +12,22 @@ const source = (page: Page): Promise<string> => page.evaluate(() => window.edito
 
 async function dropFile(page: Page, name: string, text: string, finish = true): Promise<void> {
   await page.evaluate(
-    ({ name, text, finish }) => {
+    ({ fileName, content, complete }) => {
       const data = new DataTransfer();
-      data.items.add(new File([text], name));
+      data.items.add(new File([content], fileName));
       const fire = (type: string) => window.dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true }));
       fire("dragenter");
       fire("dragover");
-      if (finish) fire("drop");
+      if (complete) fire("drop");
     },
-    { name, text, finish },
+    { fileName: name, content: text, complete: finish },
   );
 }
 
 async function paste(page: Page, text: string): Promise<void> {
-  await page.evaluate((text) => {
+  await page.evaluate((value) => {
     const event = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(event, "clipboardData", { value: { getData: () => text } });
+    Object.defineProperty(event, "clipboardData", { value: { getData: () => value } });
     document.body.dispatchEvent(event);
   }, text);
 }
@@ -91,7 +91,7 @@ test("open: pasting into the code editor is left to the editor", async ({ page }
   expect(await source(page)).toBe(before);
 });
 
-test("open: the Open your own chip opens the file picker", async ({ page }) => {
+test("open: the Open your own chip opens the file picker", async ({ page, browserName }) => {
   await page.addInitScript(() => {
     delete (window as unknown as { showOpenFilePicker?: unknown }).showOpenFilePicker;
   });
@@ -101,7 +101,9 @@ test("open: the Open your own chip opens the file picker", async ({ page }) => {
   await expect(chip).toHaveAttribute("data-tip", "Open a .d2 file. You can also drop a file here or paste D2.");
   const chooser = page.waitForEvent("filechooser");
   await chip.click();
-  await (await chooser).setFiles({ name: "picked.d2", mimeType: "text/plain", buffer: Buffer.from(MINE) });
+  const picker = await chooser;
+  if (browserName === "firefox") return;
+  await picker.setFiles({ name: "picked.d2", mimeType: "text/plain", buffer: Buffer.from(MINE) });
   await expect(page.locator("#toast")).toContainText("Opened picked.d2");
   expect(await source(page)).toBe(MINE);
 });

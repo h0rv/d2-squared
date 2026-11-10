@@ -39,11 +39,17 @@ export class LocalFile {
       const input = document.createElement("input");
       input.type = "file";
       input.accept = ".d2,text/plain";
+      input.hidden = true;
       input.onchange = async () => {
         const file = input.files?.[0];
+        input.remove();
         resolve(file ? { name: file.name, text: await file.text() } : null);
       };
-      input.oncancel = () => resolve(null);
+      input.oncancel = () => {
+        input.remove();
+        resolve(null);
+      };
+      document.body.append(input);
       input.click();
     });
   }
