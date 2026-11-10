@@ -476,8 +476,9 @@ select {
 }
 
 .menu-select {
-  flex: none;
-  width: 128px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 160px;
   height: 30px;
   padding: 0 8px;
   border: 1px solid var(--border);
