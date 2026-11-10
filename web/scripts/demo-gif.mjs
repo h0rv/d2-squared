@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { deflateRawSync } from "node:zlib";
 import path from "node:path";
 import { chromium } from "@playwright/test";
 import gifenc from "gifenc";
@@ -37,18 +38,36 @@ const cursor = () => {
   document.addEventListener("DOMContentLoaded", () => {
     const dot = document.createElement("div");
     dot.style.cssText =
-      "position:fixed;left:0;top:0;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:rgba(20,24,36,.45);border:2px solid #fff;box-shadow:0 0 0 1px rgba(20,24,36,.6);pointer-events:none;z-index:2147483647;display:none";
+      "position:fixed;left:0;top:0;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:rgba(20,24,36,.4);border:2px solid #fff;box-shadow:0 0 0 1px rgba(20,24,36,.6);pointer-events:none;z-index:2147483647;display:none;transition:background .08s,transform .08s";
     document.body.append(dot);
+    let x = 0;
+    let y = 0;
+    let scale = 1;
+    const paint = () => {
+      dot.style.display = "block";
+      dot.style.transform = `translate(${x}px,${y}px) scale(${scale})`;
+      dot.style.background = scale < 1 ? "rgba(20,24,36,.8)" : "rgba(20,24,36,.4)";
+    };
     addEventListener(
       "pointermove",
       (e) => {
-        dot.style.display = "block";
-        dot.style.transform = `translate(${e.clientX}px,${e.clientY}px)`;
+        x = e.clientX;
+        y = e.clientY;
+        paint();
       },
       true,
     );
+    addEventListener("pointerdown", () => ((scale = 0.7), paint()), true);
+    addEventListener("pointerup", () => ((scale = 1), paint()), true);
   });
 };
+
+const SOURCE = readFileSync(path.resolve(import.meta.dirname, "../../examples/architecture.d2"), "utf8")
+  .replace("  notifier: Notifier\n", "")
+  .replace("  queue: Event bus {shape: queue}\n", "  queue: Event bus {shape: queue}\n  notifier: Notifier\n")
+  .replace("services.orders -> data.db", "services.orders -> data.cache")
+  .replace("data.queue -> services.notifier", "data.queue -> data.notifier");
+const hash = "#s=" + deflateRawSync(Buffer.from(SOURCE)).toString("base64url");
 
 async function main() {
   await waitForServer();
@@ -58,12 +77,27 @@ async function main() {
   await context.addInitScript(cursor);
   const page = await context.newPage();
   const decoder = await context.newPage();
-  await page.goto(URL);
+  await page.goto(URL + hash);
   await page.waitForFunction(
     () => !!window.editor?.view?.scene && !!document.body.dataset["ready"] && !document.getElementById("loading")?.offsetParent,
   );
-  await page.evaluate(() => window.editor.fit());
-  await sleep(800);
+  const pan = await page.evaluate(() => {
+    const e = window.editor;
+    const a = e.shape("services");
+    const b = e.shape("data");
+    const x0 = Math.min(a.x, b.x);
+    const y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x + a.width, b.x + b.width);
+    const y1 = Math.max(a.y + a.height, b.y + b.height);
+    e.setScale(Math.min(1080 / (x1 - x0), 560 / (y1 - y0)));
+    const mid = e.screenPoint((x0 + x1) / 2, (y0 + y1) / 2);
+    return { x: innerWidth / 2 - mid.x, y: innerHeight / 2 + 28 - mid.y };
+  });
+  await page.mouse.move(WIDTH / 2, HEIGHT / 2);
+  await page.mouse.wheel(-pan.x, -pan.y);
+  await sleep(500);
+  await page.mouse.move(WIDTH - 140, HEIGHT - 110);
+  await sleep(300);
 
   const frames = [];
   const session = await context.newCDPSession(page);
@@ -74,45 +108,55 @@ async function main() {
   await session.send("Page.startScreencast", { format: "jpeg", quality: 95, maxWidth: WIDTH, maxHeight: HEIGHT, everyNthFrame: 1 });
 
   const center = (id) => page.evaluate((i) => window.editor.screenCenter(i), id);
-  const glide = async (from, to, steps, pause) => {
-    for (let i = 1; i <= steps; i++) {
-      const t = i / steps;
-      const ease = t * t * (3 - 2 * t);
+  const inside = (id) =>
+    page.evaluate((i) => {
+      const s = window.editor.shape(i);
+      return window.editor.screenPoint(s.x + s.width / 2, s.y + s.height - 12 / window.editor.scale);
+    }, id);
+  let pointer = { x: WIDTH - 140, y: HEIGHT - 110 };
+  const glide = async (to, ms) => {
+    const from = pointer;
+    const started = Date.now();
+    for (;;) {
+      const t = Math.min(1, (Date.now() - started) / ms);
+      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
       await page.mouse.move(from.x + (to.x - from.x) * ease, from.y + (to.y - from.y) * ease);
-      await sleep(pause);
+      if (t >= 1) break;
     }
+    pointer = to;
   };
+  const toast = (text) => page.waitForFunction((t) => document.getElementById("toast")?.textContent?.includes(t), text);
 
-  const billing = await center("services.billing");
-  const data = await center("data");
-  await page.mouse.move(billing.x + 60, billing.y + 90);
-  await sleep(300);
-  await glide({ x: billing.x + 60, y: billing.y + 90 }, billing, 6, 10);
+  await sleep(700);
+  const notifier = await center("data.notifier");
+  await glide(notifier, 150);
   await page.mouse.down();
-  await sleep(250);
-  await glide(billing, { x: data.x, y: data.y - 20 }, 80, 16);
-  await sleep(1100);
+  await sleep(80);
+  await glide(await inside("services"), 700);
+  await sleep(120);
   await page.mouse.up();
-  await page.waitForFunction(() => !window.editor.busy);
-  await page.waitForFunction(() => document.getElementById("toast")?.textContent?.includes("Moved Billing into Data"));
-  await sleep(1300);
+  await toast("Moved Notifier into Services");
+  await sleep(700);
 
-  const edge = await page.evaluate(() => window.editor.view.conns.find((c) => c.src === "gateway" && c.dst === "services.auth").id);
+  const edge = await page.evaluate(() => window.editor.view.conns.find((c) => c.src === "services.orders" && c.dst === "data.cache").id);
   const end = await page.evaluate((e) => window.editor.endScreen(e, "dst"), edge);
-  const target = await center("services.orders");
-  await glide(await page.evaluate(() => ({ x: innerWidth / 2, y: innerHeight - 140 })), end, 8, 10);
+  await glide(end, 150);
   await page.mouse.down();
-  await sleep(150);
-  await glide(end, { x: target.x, y: target.y }, 45, 16);
-  await sleep(800);
+  await sleep(80);
+  const db = await center("data.db");
+  await glide(db, 700);
+  await sleep(120);
   await page.mouse.up();
-  await page.waitForFunction(() => !window.editor.busy);
-  await page.waitForFunction(() => document.getElementById("toast")?.textContent?.includes("Connected to"));
-  await sleep(1300);
+  await toast("Connected to Postgres");
+  await sleep(700);
 
-  await sleep(200);
+  await sleep(900);
   await session.send("Page.stopScreencast");
   const finishedAt = frames.at(-1).at + 200;
+  if (process.env["DEMO_FRAMES"]) {
+    for (let i = 0; i < frames.length; i += 6)
+      writeFileSync(path.join(process.env["DEMO_FRAMES"], `f${String(i).padStart(3, "0")}.jpg`), frames[i].jpeg);
+  }
 
   const decode = (jpeg) =>
     decoder.evaluate(async (b64) => {
@@ -140,7 +184,7 @@ async function main() {
       previous.delay += delay;
       continue;
     }
-    if (previous && previous.delay < 66) {
+    if (previous && previous.delay < 40) {
       previous.delay += delay;
       previous.raw = raw;
       continue;

@@ -1,3 +1,7 @@
+<img src="docs/logo.svg" alt="D2 squared logo" height="64">
+
+![Fixing a diagram by dragging a box into a group and an arrow onto another box in D2 squared](docs/demo.gif)
+
 # D2²
 
 D2² (D2 squared) is D2 × D2. It combines two projects that are both called D2.
@@ -13,8 +17,6 @@ You can also:
 - See the diagram as text, in Unicode or ASCII.
 - Turn on sketch mode or pick a D2 theme.
 - Export SVG, PNG or text.
-
-![Dragging Billing into the Data group in D2 squared](docs/demo.gif)
 
 ## Try it
 
