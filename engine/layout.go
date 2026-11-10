@@ -150,7 +150,7 @@ func elbow(e *d2graph.Edge) []*geo.Point {
 	return []*geo.Point{a, geo.NewPoint(a.X, mid), geo.NewPoint(b.X, mid), b}
 }
 
-func compileSource(ctx context.Context, source string, cfg Config, layout layoutFn, themeID int64, darkThemeID *int64) (*d2target.Diagram, *d2graph.Graph, *d2svg.RenderOpts, error) {
+func compileSource(ctx context.Context, source string, cfg Config, layout layoutFn, themeID, darkThemeID *int64) (*d2target.Diagram, *d2graph.Graph, *d2svg.RenderOpts, error) {
 	ruler := rulers.Get().(*textmeasure.Ruler)
 	defer rulers.Put(ruler)
 	opts := &d2lib.CompileOptions{
@@ -164,7 +164,7 @@ func compileSource(ctx context.Context, source string, cfg Config, layout layout
 			return nil, nil
 		},
 	}
-	renderOpts := &d2svg.RenderOpts{Pad: go2.Pointer(int64(pad)), ThemeID: go2.Pointer(themeID), DarkThemeID: darkThemeID, Sketch: go2.Pointer(cfg.Sketch)}
+	renderOpts := &d2svg.RenderOpts{Pad: go2.Pointer(int64(pad)), ThemeID: themeID, DarkThemeID: darkThemeID, Sketch: go2.Pointer(cfg.Sketch)}
 	diagram, g, err := d2lib.Compile(d2log.WithDefault(ctx), source, opts, renderOpts)
 	return diagram, g, renderOpts, err
 }
@@ -175,7 +175,7 @@ func layoutWith(ctx context.Context, source string, plan layoutPlan) (*Layout, e
 	if err != nil {
 		return nil, err
 	}
-	diagram, g, renderOpts, err := compileSource(ctx, source, cfg, plan(cfg), cfg.ThemeID, &cfg.DarkThemeID)
+	diagram, g, renderOpts, err := compileSource(ctx, source, cfg, plan(cfg), cfg.ThemeID, cfg.DarkThemeID)
 	if err != nil {
 		return nil, err
 	}

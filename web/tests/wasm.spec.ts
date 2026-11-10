@@ -355,7 +355,6 @@ test("wasm: resize a box and a group by their corner handles", async ({ page }) 
   const group = await diagram.mustShape("services");
   const inside = await diagram.at(group.x + 12, group.y + 12);
   await page.mouse.click(inside.x, inside.y);
-  await expect(page.locator(".d2-action")).toBeVisible();
   const gse = await corner(page, "services", "se");
   await diagram.drag(gse, { x: gse.x + 70, y: gse.y + 50 }, { hold: false });
   const wide = await diagram.mustShape("services");
@@ -364,10 +363,17 @@ test("wasm: resize a box and a group by their corner handles", async ({ page }) 
   await page.screenshot({ path: "test-results/ux-v2/light-desktop-resized.png" });
 });
 
-test("wasm: tidy up a group drops its saved positions and keeps the rest", async ({ page }) => {
+test("wasm: auto-arrange a group drops its saved positions and keeps the rest", async ({ page }) => {
   const { diagram } = await open(page, "architecture");
   await page.evaluate(() => window.editor!.fit());
   await sleep(400);
+  const first = await diagram.mustShape("services");
+  const nowhere = await diagram.at(first.x + 14, first.y + 14);
+  await page.mouse.click(nowhere.x, nowhere.y);
+  await page.click("#more");
+  await expect(page.locator("#tidy")).toBeHidden();
+  await expect(page.locator("#reset")).toBeHidden();
+  await page.keyboard.press("Escape");
   const notifier = await diagram.mustShape("services.notifier");
   const group = await diagram.mustShape("services");
   const from = await diagram.center("services.notifier");
@@ -379,12 +385,15 @@ test("wasm: tidy up a group drops its saved positions and keeps the rest", async
   const gateway = await diagram.mustShape("gateway");
   const inside = await diagram.at(group.x + 14, group.y + 14);
   await page.mouse.click(inside.x, inside.y);
-  const tidy = page.locator(".d2-action");
-  await expect(tidy).toBeVisible();
-  await expect(tidy).toHaveText("Tidy up");
+  await expect(page.locator(".d2-action")).toHaveCount(0);
+  await page.click("#more");
+  const tidy = page.locator("#tidy");
+  await expect(tidy).toHaveText("Auto-arrange Services");
+  await expect(page.locator("#reset")).toHaveText("Auto-arrange everything");
+  await expect(page.locator("#reset")).toBeVisible();
   await page.screenshot({ path: "test-results/ux-v2/light-desktop-tidy-action.png" });
   await tidy.click();
-  await expect(page.locator("#toast")).toContainText("Tidied up Services");
+  await expect(page.locator("#toast")).toContainText("Auto-arranged Services");
   await diagram.idle();
   await sleep(700);
   const tidied = await diagram.source();

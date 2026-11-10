@@ -11,6 +11,7 @@ import (
 	"github.com/d2lang/d2/d2compiler"
 	"github.com/d2lang/d2/d2format"
 	"github.com/d2lang/d2/d2parser"
+	"github.com/d2lang/d2/d2themes"
 	"github.com/d2lang/d2/d2themes/d2themescatalog"
 )
 
@@ -18,9 +19,6 @@ const (
 	engineTala  = "tala"
 	engineELK   = "elk"
 	engineDagre = "dagre"
-
-	defaultTheme     = 0
-	defaultDarkTheme = 200
 )
 
 var engines = []string{engineTala, engineELK, engineDagre}
@@ -28,8 +26,42 @@ var engines = []string{engineTala, engineELK, engineDagre}
 type Config struct {
 	Engine      string `json:"engine"`
 	Sketch      bool   `json:"sketch"`
-	ThemeID     int64  `json:"themeId"`
-	DarkThemeID int64  `json:"darkThemeId"`
+	ThemeID     *int64 `json:"themeId,omitempty"`
+	DarkThemeID *int64 `json:"darkThemeId,omitempty"`
+}
+
+type ThemeChoice struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type Choice struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type Catalog struct {
+	Themes     []ThemeChoice `json:"themes"`
+	DarkThemes []ThemeChoice `json:"darkThemes"`
+	Engines    []Choice      `json:"engines"`
+	Charsets   []Choice      `json:"charsets"`
+}
+
+func themeChoices(themes []d2themes.Theme) []ThemeChoice {
+	out := make([]ThemeChoice, 0, len(themes))
+	for _, t := range themes {
+		out = append(out, ThemeChoice{ID: t.ID, Name: t.Name})
+	}
+	return out
+}
+
+func Describe() Catalog {
+	return Catalog{
+		Themes:     themeChoices(d2themescatalog.LightCatalog),
+		DarkThemes: themeChoices(d2themescatalog.DarkCatalog),
+		Engines:    []Choice{{engineTala, "TALA"}, {engineELK, "ELK"}, {engineDagre, "dagre"}},
+		Charsets:   []Choice{{"unicode", "Unicode"}, {"ascii", "ASCII"}},
+	}
 }
 
 func readConfig(source string) (Config, error) {
@@ -37,7 +69,7 @@ func readConfig(source string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	c := Config{Engine: engineTala, ThemeID: defaultTheme, DarkThemeID: defaultDarkTheme}
+	c := Config{Engine: engineTala}
 	if found == nil {
 		return c, nil
 	}
@@ -48,10 +80,10 @@ func readConfig(source string) (Config, error) {
 		c.Sketch = *found.Sketch
 	}
 	if found.ThemeID != nil {
-		c.ThemeID = *found.ThemeID
+		c.ThemeID = found.ThemeID
 	}
 	if found.DarkThemeID != nil {
-		c.DarkThemeID = *found.DarkThemeID
+		c.DarkThemeID = found.DarkThemeID
 	}
 	if !slices.Contains(engines, c.Engine) {
 		return Config{}, fmt.Errorf("the layout engine %q is not available, use tala, elk or dagre", c.Engine)
@@ -70,6 +102,9 @@ func checkConfig(key, value string) error {
 			return fmt.Errorf("sketch must be true or false")
 		}
 	case "theme-id", "dark-theme-id":
+		if value == "" {
+			return nil
+		}
 		id, err := strconv.ParseInt(value, 10, 64)
 		if err != nil || d2themescatalog.Find(id).Name == "" {
 			return fmt.Errorf("unknown theme %q", value)
@@ -100,11 +135,19 @@ func setConfig(source, key, value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	vars := childKey(ast, "vars")
+	if value == "" {
+		removeConfigKey(ast, vars, key)
+		out := d2format.Format(ast)
+		if _, err := readConfig(out); err != nil {
+			return "", err
+		}
+		return out, nil
+	}
 	entry, err := entryKey(key + ": " + value)
 	if err != nil {
 		return "", err
 	}
-	vars := childKey(ast, "vars")
 	switch {
 	case vars == nil:
 		block, err := entryKey(fmt.Sprintf("vars: {d2-config: {%s: %s}}", key, value))
@@ -138,6 +181,29 @@ func setConfig(source, key, value string) (string, error) {
 		return "", err
 	}
 	return out, nil
+}
+
+func dropNode(m *d2ast.Map, key *d2ast.Key) {
+	m.Nodes = slices.DeleteFunc(m.Nodes, func(n d2ast.MapNodeBox) bool { return n.MapKey == key })
+}
+
+func removeConfigKey(ast *d2ast.Map, vars *d2ast.Key, name string) {
+	if vars == nil || vars.Value.Map == nil {
+		return
+	}
+	config := childKey(vars.Value.Map, "d2-config")
+	if config == nil || config.Value.Map == nil {
+		return
+	}
+	if existing := childKey(config.Value.Map, name); existing != nil {
+		dropNode(config.Value.Map, existing)
+	}
+	if len(config.Value.Map.Nodes) == 0 {
+		dropNode(vars.Value.Map, config)
+	}
+	if len(vars.Value.Map.Nodes) == 0 {
+		dropNode(ast, vars)
+	}
 }
 
 type configure struct{}

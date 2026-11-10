@@ -70,42 +70,55 @@ test("engines: with dagre, placing and resizing are off and say why", async ({ p
   await page.mouse.up();
 });
 
-test("engines: the text view shows the diagram, copies it and follows edits", async ({ page, context, browserName }) => {
+async function openText(page: Page): Promise<void> {
+  await page.click("#more");
+  await page.click("#text-export");
+  await expect(page.locator("#text-modal")).toBeVisible();
+}
+
+test("engines: the text modal shows the diagram, switches characters, copies, downloads and follows edits", async ({
+  page,
+  context,
+  browserName,
+}) => {
   if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const d = await open(page);
-  await page.click("#view-text");
+  await expect(page.locator("#view-text")).toHaveCount(0);
+  await openText(page);
   const out = page.locator("#text-out");
   await expect(out).toContainText("Postgres");
   await expect(out).toContainText("┌");
   const box = await page.locator("#text-view").boundingBox();
-  expect(box!.width).toBeGreaterThan(1000);
-  await page.click("#text-ascii");
+  expect(box!.width).toBeGreaterThan(800);
+  expect(box!.width).toBeLessThan(1500);
+  await page.click('[data-charset="ascii"]');
   await expect(out).not.toContainText("┌");
   await expect(out).toContainText("Postgres");
-  await page.click("#text-unicode");
+  await page.click('[data-charset="unicode"]');
   await expect(out).toContainText("┌");
   await page.click("#text-copy");
   await expect(page.locator("#toast")).toContainText("Copied");
   if (browserName === "chromium") {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("Postgres");
   }
+  const [download] = await Promise.all([page.waitForEvent("download"), page.click("#text-download")]);
+  expect(download.suggestedFilename()).toBe("diagram.txt");
+  expect(readFileSync((await download.path())!, "utf8")).toContain("Postgres");
   const first = (await out.textContent())!;
   await page.evaluate(() => window.editor!.send({ kind: "direction", key: "", to: "down" }));
   await d.idle();
   await expect.poll(async () => (await out.textContent()) !== first).toBe(true);
-  await expect(page.locator("#toast")).toContainText("Layout direction: Down");
-  await page.click("#undo");
+  await page.evaluate(() => window.editor!.undo());
   await expect.poll(async () => await out.textContent()).toBe(first);
-  await page.click("#code-toggle");
-  await expect(page.locator("#code")).toHaveAttribute("aria-hidden", "false");
-  await page.click("#code-toggle");
-  await page.click("#redo");
-  await expect.poll(async () => (await out.textContent()) !== first).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#text-modal")).toBeHidden();
+  await openText(page);
+  await page.mouse.click(4, 4);
+  await expect(page.locator("#text-modal")).toBeHidden();
   await chooseEngine(page, d, "dagre");
+  await openText(page);
   await expect(page.locator("#text-note")).toContainText("ELK");
   await expect(out).toContainText("Postgres");
-  await page.click("#view-diagram");
-  await expect(page.locator("#text-view")).toBeHidden();
 });
 
 test("engines: sketch and theme are written to the file", async ({ page }) => {
@@ -117,8 +130,8 @@ test("engines: sketch and theme are written to the file", async ({ page }) => {
   expect(await page.evaluate(() => window.editor!.view!.config.sketch)).toBe(true);
   await page.click("#more");
   await expect(page.locator("#sketch")).toHaveAttribute("aria-checked", "true");
-  await page.selectOption("#theme", { label: "Cool classics" });
-  await expect(page.locator("#toast")).toContainText("Theme: Cool classics");
+  await page.selectOption("#theme", { label: "Cool Classics" });
+  await expect(page.locator("#toast")).toContainText("Theme: Cool Classics");
   await d.idle();
   expect(await d.source()).toMatch(/theme-id: 4/);
   await page.evaluate(() => window.editor!.undo());
@@ -128,7 +141,40 @@ test("engines: sketch and theme are written to the file", async ({ page }) => {
   expect(await d.source()).not.toMatch(/sketch: true/);
 });
 
-test("engines: export as SVG, PNG and text downloads files", async ({ page }) => {
+test("engines: theme pickers list D2's themes, write one key each and say which is in use", async ({ page }) => {
+  const d = await open(page);
+  await page.click("#more");
+  expect(await page.locator("#theme option").count()).toBeGreaterThan(10);
+  await expect(page.locator("#dark-theme option")).toHaveText(["None", "Dark Mauve", "Dark Flagship Terrastruct"]);
+  await expect(page.locator("#theme-use")).toBeVisible();
+  await expect(page.locator("#dark-theme-use")).toBeHidden();
+  await page.selectOption("#theme", { label: "Cool Classics" });
+  await expect(page.locator("#toast")).toContainText("Theme: Cool Classics");
+  await d.idle();
+  expect(await d.source()).toMatch(/theme-id: 4/);
+  expect(await d.source()).not.toMatch(/dark-theme-id/);
+  await page.click("#more");
+  await page.selectOption("#theme", { label: "Default" });
+  await expect(page.locator("#toast")).toContainText("Theme: Default");
+  await d.idle();
+  expect(await d.source()).not.toMatch(/theme-id/);
+  await page.click("#more");
+  await page.selectOption("#dark-theme", { label: "Dark Mauve" });
+  await expect(page.locator("#toast")).toContainText("Dark theme: Dark Mauve");
+  await d.idle();
+  expect(await d.source()).toMatch(/dark-theme-id: 200/);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.click("#more");
+  await expect(page.locator("#dark-theme-use")).toBeVisible();
+  await expect(page.locator("#theme-use")).toBeHidden();
+  await page.selectOption("#dark-theme", { label: "None" });
+  await d.idle();
+  expect(await d.source()).not.toMatch(/dark-theme-id/);
+  await page.click("#more");
+  await expect(page.locator("#theme-use")).toBeVisible();
+});
+
+test("engines: export as SVG and PNG downloads files", async ({ page }) => {
   await open(page);
   const get = async (kind: string) => {
     await page.click("#more");
@@ -144,7 +190,4 @@ test("engines: export as SVG, PNG and text downloads files", async ({ page }) =>
   const png = await get("png");
   expect(png.name).toBe("diagram.png");
   expect([...png.bytes.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
-  const text = await get("text");
-  expect(text.name).toBe("diagram.txt");
-  expect(text.bytes.toString("utf8")).toContain("Postgres");
 });

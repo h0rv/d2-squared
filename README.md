@@ -51,7 +51,7 @@ In D2², each drag state is a version of the `.d2` file, e.g., the file with a b
 
 - The browser engine is about 4 times slower than the native one, and it downloads about 12 MB once.
 - Small diagrams feel instant in the browser. A 36 table diagram takes a few seconds to open, so use `d2squared serve` for large ones.
-- The first edit saves a position for every box, so the file gets longer. Reset layout removes them.
+- The first edit saves a position for every box, so the file gets longer. Auto-arrange everything removes them.
 - Placing and resizing boxes need TALA. ELK and dagre ignore saved positions.
 
 ## Develop

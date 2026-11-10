@@ -476,7 +476,8 @@ select {
 }
 
 .menu-select {
-  width: 156px;
+  flex: none;
+  width: 128px;
   height: 30px;
   padding: 0 8px;
   border: 1px solid var(--border);
@@ -485,17 +486,27 @@ select {
   cursor: pointer;
 }
 
-.text-view {
+.modal {
   position: fixed;
-  top: 64px;
-  left: 12px;
-  right: max(12px, var(--inset-r));
-  bottom: max(12px, var(--inset-b));
-  z-index: 7;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--solid) 55%, transparent);
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.text-view {
   display: flex;
   flex-direction: column;
+  width: min(960px, calc(100vw - 24px));
+  height: min(640px, calc(100vh - 48px));
   min-height: 0;
   background: var(--solid);
+  outline: none;
 }
 
 .text-head {
@@ -531,11 +542,6 @@ select {
   color: var(--muted);
   font: 14px/1.5 var(--sans);
   white-space: normal;
-}
-
-body.text-mode .zoom,
-body.text-mode .hint {
-  display: none;
 }
 
 .hint {
@@ -915,12 +921,6 @@ body.toasting .hint {
     top: 60px;
     width: min(272px, calc(100vw - 24px));
   }
-  .text-view {
-    top: 64px;
-  }
-  body:has(#examples:not([hidden])) .text-view {
-    top: 108px;
-  }
   body.hint-on.toasting .zoom {
     bottom: calc(var(--inset-b) + 16px);
   }
@@ -1145,28 +1145,6 @@ body[data-ready] #editor {
   cursor: nwse-resize;
 }
 
-.d2-action {
-  position: fixed;
-  top: 0;
-  left: 0;
-  z-index: 15;
-  padding: 6px 12px;
-  border-radius: 999px;
-  color: var(--ink);
-  font: 600 12.5px/1.3 var(--sans);
-  cursor: pointer;
-  will-change: transform;
-}
-
-.d2-action:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.d2-action[hidden] {
-  display: none;
-}
-
 .l-ui .target {
   fill: color-mix(in srgb, var(--accent) 12%, transparent);
   stroke: var(--accent);
@@ -1262,4 +1240,18 @@ body[data-ready] #editor {
 
 #open-own {
   position: relative;
+}
+
+.use {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.use[hidden] {
+  display: none;
 }

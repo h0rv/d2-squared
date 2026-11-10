@@ -1,4 +1,4 @@
-import type { Candidate, Edit, Point, PreviewMessage, RouteResult, Target, TextResult, View } from "../types";
+import type { Candidate, Catalog, Edit, Point, PreviewMessage, RouteResult, Target, TextResult, View } from "../types";
 import { EngineError, type Engine } from "./engine";
 
 export interface ServeInfo {
@@ -129,6 +129,10 @@ export class HttpEngine implements Engine {
 
   async text(unicode: boolean): Promise<TextResult> {
     return this.json(await fetch(`${this.base}api/text?charset=${unicode ? "unicode" : "ascii"}`));
+  }
+
+  async catalog(): Promise<Catalog> {
+    return this.json(await fetch(`${this.base}api/catalog`));
   }
 
   async exportSvg(dark: boolean): Promise<string> {

@@ -1,7 +1,6 @@
 import type { Engine } from "../engine/engine";
-import { unicodePreferred } from "../ui/textview";
 
-export type ExportKind = "svg" | "png" | "text";
+export type ExportKind = "svg" | "png";
 
 const SCALE = 2;
 const DARK_BACKGROUND = "#0a0a23";
@@ -53,11 +52,6 @@ async function rasterize(svg: string, dark: boolean): Promise<Blob> {
 
 export async function exportAs(kind: ExportKind, engine: Engine, name: string): Promise<string> {
   const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-  if (kind === "text") {
-    const { text } = await engine.text(unicodePreferred());
-    download(`${name}.txt`, new Blob([text], { type: "text/plain;charset=utf-8" }));
-    return "Exported as text";
-  }
   const svg = await engine.exportSvg(dark);
   if (kind === "svg") {
     download(`${name}.svg`, new Blob([svg], { type: "image/svg+xml" }));

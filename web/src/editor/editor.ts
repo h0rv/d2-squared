@@ -1,5 +1,5 @@
 import type { Engine } from "../engine/engine";
-import { landsIn, midpoint, nameOf, parentOf, pathD, within } from "../geometry";
+import { landsIn, midpoint, nameOf, pathD, within } from "../geometry";
 import { svgEl } from "../svg";
 import { showTip } from "../ui/toast";
 import type { Candidate, Conn, Edit, Path, PendingChange, Point, Shape, Target, View } from "../types";
@@ -153,8 +153,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   const talaOnly = ["pin", "resize"];
   root.classList.add("d2-root");
   root.innerHTML = `<div class="d2-stage"><svg class="d2-scene d2squared"><defs></defs><style></style><g class="d2-cam"><g class="l-groups"></g><g class="l-conns"></g><g class="l-shapes"></g><g class="l-drag"></g><g class="l-sel"></g><g class="l-ui"></g></g></svg></div>
-    <div class="d2-tip" aria-hidden="true" hidden></div>
-    <button class="surface d2-action" hidden>Tidy up</button>`;
+    <div class="d2-tip" aria-hidden="true" hidden></div>`;
   const q = <T extends Element>(sel: string): T => root.querySelector(sel) as T;
   const stage = q<HTMLElement>(".d2-stage");
   const scene = q<SVGSVGElement>(".d2-scene");
@@ -163,7 +162,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   const selLayer = q<SVGGElement>(".l-sel");
   const over = q<SVGGElement>(".l-ui");
   const tip = q<HTMLElement>(".d2-tip");
-  const action = q<HTMLButtonElement>(".d2-action");
 
   let view: View | null = null;
   let box = { x: 0, y: 0, w: 1, h: 1 };
@@ -247,7 +245,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     stage.style.setProperty("--grid-x", `${tx}px`);
     stage.style.setProperty("--grid-y", `${ty}px`);
     if (scale !== drawnScale) drawSelection();
-    placeAction();
   }
 
   function keepVisible(): void {
@@ -441,21 +438,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
   }
 
-  function placeAction(): void {
-    const s = selected && !drag && !resizing ? shapes.get(selected) : undefined;
-    if (!s || !view || !view.shapes.some((c) => parentOf(c.id) === s.id)) {
-      action.hidden = true;
-      return;
-    }
-    action.hidden = false;
-    const top = toScreen({ x: s.x, y: s.y });
-    const right = toScreen({ x: s.x + s.width, y: s.y });
-    const r = stage.getBoundingClientRect();
-    const x = clamp(right.x - action.offsetWidth, r.left + 8, r.right - action.offsetWidth - 8);
-    const y = Math.max(top.y - action.offsetHeight - 10, r.top + 8);
-    action.style.transform = `translate(${x}px, ${y}px)`;
-  }
-
   function hitHandle(p: Point, touch = false): Corner | null {
     const s = resizable(selected);
     if (!s || !enabled.has("resize")) return null;
@@ -477,7 +459,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     stage.classList.add("resizing");
     hover = null;
     over.replaceChildren();
-    placeAction();
   }
 
   function moveResize(ev: PointerEvent): void {
@@ -507,7 +488,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     over.replaceChildren();
     const { rect: n, from } = r;
     if (cancelled || (n.x === from.x && n.y === from.y && n.w === from.w && n.h === from.h) || !view) {
-      placeAction();
       return;
     }
     busy = true;
@@ -812,7 +792,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     scene.classList.add("dragging");
     stage.classList.add("dragging");
     hover = null;
-    placeAction();
     d.liftAt = performance.now();
     schedule(d);
   }
@@ -1125,7 +1104,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   function select(id: string): void {
     selected = id;
     drawSelection();
-    placeAction();
     emit("select", id);
   }
 
@@ -1167,7 +1145,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     over.replaceChildren();
     if (selected && !shapes.has(selected)) selected = "";
     drawSelection();
-    placeAction();
     emit("error", null);
     emit("view", v, prev);
     if (prev && fitted && v.cause !== "open") window.setTimeout(() => fitted && !drag && !busy && fit(true), 320);
@@ -1204,7 +1181,8 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
   const DONE: Partial<Record<Edit["kind"], (e: Edit) => string>> = {
     config: (e) => describeConfig(e),
     direction: (e) => `Layout direction: ${DIRECTIONS[e.to ?? ""] ?? e.to ?? ""}`,
-    tidy: (e) => `Tidied up ${labelOf(e.key)}`,
+    tidy: (e) => `Auto-arranged ${labelOf(e.key)}`,
+    unpin: (e) => `Auto-arranged ${e.key ? labelOf(e.key) : "everything"}`,
   };
 
   async function send(edit: Edit): Promise<void> {
@@ -1212,7 +1190,7 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     busy = true;
     setStatus("Laying out…", "busy");
     try {
-      const done = DONE[edit.kind]?.(edit) ?? "Reset layout";
+      const done = DONE[edit.kind]?.(edit) ?? "Settings changed";
       const v = await engine.commit(edit, view.version);
       applyView(v);
       setStatus(done, "done");
@@ -1232,9 +1210,6 @@ export function mount(root: HTMLElement, engine: Engine, opts: EditorOptions = {
     }
   });
 
-  action.addEventListener("click", () => {
-    if (selected) void send({ kind: "tidy", key: selected });
-  });
   stage.addEventListener("pointerdown", onDown);
   stage.addEventListener("pointermove", onMove);
   stage.addEventListener("pointerup", onUp);

@@ -243,13 +243,15 @@ test("serve: ELK is saved to the file and the exports download", async ({ page, 
   await page.waitForFunction(() => window.editor!.view!.config.engine === "elk", null, { timeout: 60_000 });
   await d.idle();
   expect(served.source()).toMatch(/layout-engine: elk/);
-  await page.click("#view-text");
+  await page.click("#more");
+  await page.click("#text-export");
   await expect(page.locator("#text-out")).toContainText("Postgres");
-  await page.click("#view-diagram");
+  const [textDownload] = await Promise.all([page.waitForEvent("download"), page.click("#text-download")]);
+  expect(textDownload.suggestedFilename()).toBe("diagram.txt");
+  await page.keyboard.press("Escape");
   for (const [kind, name] of [
     ["svg", "diagram.svg"],
     ["png", "diagram.png"],
-    ["text", "diagram.txt"],
   ] as const) {
     await page.click("#more");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click(`[data-export="${kind}"]`)]);
@@ -268,11 +270,12 @@ const centerGap = (page: import("@playwright/test").Page) =>
     };
   });
 
-test("serve: the text view shows the diagram, centers it and copies it", async ({ page, context, browserName, serve }) => {
+test("serve: the text modal shows the diagram, centers it and copies it", async ({ page, context, browserName, serve }) => {
   if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const served = await serve("sized.d2");
   const d = await open(page, served.url);
-  await page.click("#view-text");
+  await page.click("#more");
+  await page.click("#text-export");
   const out = page.locator("#text-out");
   await expect(out).toContainText("Alpha");
   await expect(out).toContainText("Gamma");
@@ -291,7 +294,7 @@ const textSizes = {
 };
 
 for (const fixture of ["sized.d2", "arch.d2"]) {
-  test(`serve: text view screenshots (${fixture})`, async ({ browser, serve }) => {
+  test(`serve: text modal screenshots (${fixture})`, async ({ browser, serve }) => {
     mkdirSync("test-results/ux-v6", { recursive: true });
     const served = await serve(fixture);
     const name = fixture.replace(".d2", "");
@@ -303,10 +306,11 @@ for (const fixture of ["sized.d2", "arch.d2"]) {
         });
         const page = await context.newPage();
         await open(page, served.url);
-        await page.click("#view-text");
+        await page.click("#more");
+        await page.click("#text-export");
         await expect(page.locator("#text-out")).toContainText(fixture === "sized.d2" ? "Alpha" : "Postgres");
         for (const charset of ["unicode", "ascii"]) {
-          await page.click(`#text-${charset}`);
+          await page.click(`[data-charset="${charset}"]`);
           await sleep(500);
           await page.screenshot({
             path: `test-results/ux-v6/${name}-${scheme}-${size}-${charset}.png`,

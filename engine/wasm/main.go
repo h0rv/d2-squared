@@ -146,6 +146,10 @@ func exportSVG(_ js.Value, args []js.Value) any {
 	})
 }
 
+func catalog(js.Value, []js.Value) any {
+	return promise(func() (any, error) { return engine.Describe(), nil })
+}
+
 func main() {
 	api := js.Global().Get("Object").New()
 	api.Set("open", js.FuncOf(open))
@@ -159,6 +163,7 @@ func main() {
 	api.Set("redo", history(session.Redo))
 	api.Set("verify", js.FuncOf(verify))
 	api.Set("text", js.FuncOf(text))
+	api.Set("catalog", js.FuncOf(catalog))
 	api.Set("exportSvg", js.FuncOf(exportSVG))
 	js.Global().Set("d2squared", api)
 	if ready := js.Global().Get("d2squaredReady"); ready.Type() == js.TypeFunction {

@@ -1,4 +1,4 @@
-import type { Candidate, Edit, Point, PreviewMessage, RouteResult, Target, TextResult, View } from "../types";
+import type { Candidate, Catalog, Edit, Point, PreviewMessage, RouteResult, Target, TextResult, View } from "../types";
 
 export interface Engine {
   readonly kind: "http" | "wasm";
@@ -12,6 +12,7 @@ export interface Engine {
   redo(): Promise<View>;
   text(unicode: boolean): Promise<TextResult>;
   exportSvg(dark: boolean): Promise<string>;
+  catalog(): Promise<Catalog>;
   open?(source: string): Promise<View>;
   reload?(source: string): Promise<View>;
 }

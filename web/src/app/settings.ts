@@ -1,6 +1,6 @@
 import type { Editor } from "../editor/editor";
-import type { LayoutEngine, View } from "../types";
-import { DARK_THEMES, LIGHT_THEMES, type ThemeChoice } from "./themes";
+import type { Choice, Config, LayoutEngine, ThemeChoice, View } from "../types";
+import { catalog } from "./catalog";
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const node = document.getElementById(id);
@@ -8,17 +8,43 @@ const $ = <T extends HTMLElement>(id: string): T => {
   return node as T;
 };
 
-function fill(select: HTMLSelectElement, themes: ThemeChoice[]): void {
-  select.replaceChildren(...themes.map((t) => new Option(t.name, String(t.id))));
+function fill(select: HTMLSelectElement, first: string, themes: ThemeChoice[]): void {
+  select.replaceChildren(new Option(first, ""), ...themes.map((t) => new Option(t.name, String(t.id))));
+}
+
+function engineButtons(host: HTMLElement, engines: Choice[]): HTMLElement[] {
+  host.replaceChildren(
+    ...engines.map((engine) => {
+      const button = document.createElement("button");
+      button.className = "menu-item";
+      button.setAttribute("role", "menuitemradio");
+      button.setAttribute("aria-checked", "false");
+      button.dataset["engine"] = engine.id;
+      button.textContent = engine.name;
+      return button;
+    }),
+  );
+  return [...host.querySelectorAll<HTMLElement>("[data-engine]")];
 }
 
 export function wireSettings(editor: Editor, closeMenu: () => void): (view: View) => void {
   const theme = $<HTMLSelectElement>("theme");
   const dark = $<HTMLSelectElement>("dark-theme");
   const sketch = $("sketch");
-  const engines = [...document.querySelectorAll<HTMLElement>("[data-engine]")];
-  fill(theme, LIGHT_THEMES);
-  fill(dark, DARK_THEMES);
+  const { themes, darkThemes, engines: choices } = catalog();
+  const engines = engineButtons($("engines"), choices);
+  const scheme = matchMedia("(prefers-color-scheme: dark)");
+  let config: Config | null = null;
+  fill(theme, "Default", themes);
+  fill(dark, "None", darkThemes);
+
+  const paintUse = (): void => {
+    const night = scheme.matches;
+    const darkSet = config?.darkThemeId !== undefined;
+    $("theme-use").hidden = night && darkSet;
+    $("dark-theme-use").hidden = !(night && darkSet);
+  };
+  scheme.addEventListener("change", paintUse);
 
   for (const button of engines) {
     button.onclick = () => {
@@ -41,10 +67,11 @@ export function wireSettings(editor: Editor, closeMenu: () => void): (view: View
   };
 
   return (view) => {
-    const { config } = view;
+    config = view.config;
     for (const button of engines) button.setAttribute("aria-checked", String(button.dataset["engine"] === config.engine));
     sketch.setAttribute("aria-checked", String(config.sketch));
-    theme.value = String(config.themeId);
-    dark.value = String(config.darkThemeId);
+    theme.value = config.themeId === undefined ? "" : String(config.themeId);
+    dark.value = config.darkThemeId === undefined ? "" : String(config.darkThemeId);
+    paintUse();
   };
 }

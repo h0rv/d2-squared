@@ -16,6 +16,7 @@ interface D2SquaredApi {
   verify(): Promise<string>;
   text(unicode: boolean): Promise<string>;
   exportSvg(dark: boolean): Promise<string>;
+  catalog(): Promise<string>;
 }
 
 declare var d2squared: D2SquaredApi;

@@ -37,11 +37,6 @@
       <button id="undo" class="icon-btn" aria-label="Undo" data-tip="Undo" disabled></button>
       <button id="redo" class="icon-btn" aria-label="Redo" data-tip="Redo" disabled></button>
       <span class="sep"></span>
-      <div id="view-toggle" class="seg" role="radiogroup" aria-label="View">
-        <button id="view-diagram" class="seg-btn" role="radio" aria-checked="true">Diagram</button>
-        <button id="view-text" class="seg-btn" role="radio" aria-checked="false">Text</button>
-      </div>
-      <span class="sep"></span>
       <button id="code-toggle" class="btn" aria-pressed="false" aria-controls="code" aria-label="Code" data-tip="Show the D2 code"></button>
       <button id="more" class="icon-btn" aria-label="More" aria-haspopup="menu" aria-expanded="false" data-tip="More"></button>
     </div>
@@ -63,26 +58,22 @@
           <button class="menu-item" role="menuitem" data-dir="left" aria-label="Left" data-tip="Left"></button>
         </div>
       </div>
-      <button id="tidy" class="menu-item" role="menuitem" hidden>Tidy up</button>
-      <button id="reset" class="menu-item" role="menuitem">Reset layout</button>
+      <button id="tidy" class="menu-item" role="menuitem" hidden>Auto-arrange</button>
+      <button id="reset" class="menu-item" role="menuitem" hidden>Auto-arrange everything</button>
       <div class="menu-row" role="group" aria-label="Layout engine">
         <span>Layout engine</span>
-        <div class="mini-seg words">
-          <button class="menu-item" role="menuitemradio" aria-checked="false" data-engine="tala">TALA</button>
-          <button class="menu-item" role="menuitemradio" aria-checked="false" data-engine="elk">ELK</button>
-          <button class="menu-item" role="menuitemradio" aria-checked="false" data-engine="dagre">dagre</button>
-        </div>
+        <div id="engines" class="mini-seg words"></div>
       </div>
       <h2 class="menu-head">Look</h2>
       <button id="sketch" class="menu-item spread" role="menuitemcheckbox" aria-checked="false">
         <span>Sketch</span><span class="tick" aria-hidden="true"></span>
       </button>
       <div class="menu-row">
-        <label for="theme">Theme</label>
+        <label for="theme">Theme <span id="theme-use" class="use">in use</span></label>
         <select id="theme" class="menu-select"></select>
       </div>
       <div class="menu-row">
-        <label for="dark-theme">Dark theme</label>
+        <label for="dark-theme">Dark theme <span id="dark-theme-use" class="use" hidden>in use</span></label>
         <select id="dark-theme" class="menu-select"></select>
       </div>
       <h2 class="menu-head">Export</h2>
@@ -90,7 +81,7 @@
         <div class="mini-seg words">
           <button class="menu-item" role="menuitem" data-export="svg">SVG</button>
           <button class="menu-item" role="menuitem" data-export="png">PNG</button>
-          <button class="menu-item" role="menuitem" data-export="text">Text</button>
+          <button id="text-export" class="menu-item" role="menuitem">Text…</button>
         </div>
       </div>
     </div>
@@ -106,20 +97,20 @@
       <button id="fit" class="icon-btn" aria-label="Fit to screen" data-tip="Fit to screen"></button>
     </div>
 
-    <section id="text-view" class="surface text-view" aria-label="The diagram as text" hidden>
-      <header class="text-head">
-        <div id="text-charset" class="seg" role="radiogroup" aria-label="Characters">
-          <button id="text-unicode" class="seg-btn" role="radio" aria-checked="true">Unicode</button>
-          <button id="text-ascii" class="seg-btn" role="radio" aria-checked="false">ASCII</button>
+    <div id="text-modal" class="modal" hidden>
+      <section id="text-view" class="surface text-view" role="dialog" aria-modal="true" aria-label="The diagram as text" tabindex="-1">
+        <header class="text-head">
+          <div id="text-charset" class="seg" role="radiogroup" aria-label="Characters"></div>
+          <span id="text-note" class="muted"></span>
+          <span class="grow"></span>
+          <button id="text-copy" class="btn">Copy</button>
+          <button id="text-download" class="btn">Download</button>
+        </header>
+        <div id="text-scroll" class="text-scroll">
+          <pre id="text-out" class="text-out" tabindex="0"></pre>
         </div>
-        <span id="text-note" class="muted"></span>
-        <span class="grow"></span>
-        <button id="text-copy" class="btn">Copy</button>
-      </header>
-      <div id="text-scroll" class="text-scroll">
-        <pre id="text-out" class="text-out" tabindex="0"></pre>
-      </div>
-    </section>
+      </section>
+    </div>
 
     <div id="toast" class="surface toast" role="status" aria-live="polite" hidden></div>
 

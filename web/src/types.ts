@@ -71,8 +71,25 @@ export type LayoutEngine = "tala" | "elk" | "dagre";
 export interface Config {
   engine: LayoutEngine;
   sketch: boolean;
-  themeId: number;
-  darkThemeId: number;
+  themeId?: number;
+  darkThemeId?: number;
+}
+
+export interface ThemeChoice {
+  id: number;
+  name: string;
+}
+
+export interface Choice {
+  id: string;
+  name: string;
+}
+
+export interface Catalog {
+  themes: ThemeChoice[];
+  darkThemes: ThemeChoice[];
+  engines: Choice[];
+  charsets: Choice[];
 }
 
 export interface TextResult {

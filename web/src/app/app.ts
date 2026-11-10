@@ -1,13 +1,14 @@
 import type { Engine } from "../engine/engine";
-import { parentOf } from "../geometry";
+import { within } from "../geometry";
 import { HttpEngine, probeServe } from "../engine/http-engine";
 import { mount, type Editor } from "../editor/editor";
 import { mountCode, type CodePanel } from "../ui/code";
 import { ICONS, type IconName } from "../ui/icons";
 import { store } from "../ui/store";
-import { mountTextView, type TextView } from "../ui/textview";
+import { mountTextModal, type TextModal } from "../ui/textview";
 import { mountToasts, type Toasts } from "../ui/toast";
 import { PLACING_NEEDS_TALA } from "../editor/zones";
+import { setCatalog } from "./catalog";
 import { EXAMPLES } from "./examples";
 import { exportAs, type ExportKind } from "./export";
 import { LocalFile } from "./files";
@@ -80,24 +81,14 @@ function paintIcons(): void {
 interface Chrome {
   panel: CodePanel;
   toasts: Toasts;
-  textView: TextView;
+  textModal: TextModal;
 }
 
-function wireViewToggle(text: TextView, editor: Editor): void {
-  const diagram = $("view-diagram");
-  const words = $("view-text");
-  const choose = (showText: boolean): void => {
-    text.setActive(showText);
-    if (showText) editor.deselect();
-    diagram.setAttribute("aria-checked", String(!showText));
-    words.setAttribute("aria-checked", String(showText));
-    if (!showText) window.requestAnimationFrame(() => editor.fit());
+function wireExport(engine: Engine, toasts: Toasts, textModal: TextModal, name: () => string): void {
+  $("text-export").onclick = () => {
+    closeMenu();
+    textModal.open();
   };
-  diagram.onclick = () => choose(false);
-  words.onclick = () => choose(true);
-}
-
-function wireExport(engine: Engine, toasts: Toasts, name: () => string): void {
   for (const button of document.querySelectorAll<HTMLElement>("[data-export]")) {
     button.onclick = async () => {
       closeMenu();
@@ -112,14 +103,14 @@ function wireExport(engine: Engine, toasts: Toasts, name: () => string): void {
 }
 
 function wireCanvas(editor: Editor, chrome: Chrome): void {
-  const { panel, toasts, textView } = chrome;
+  const { panel, toasts, textModal } = chrome;
   const undo = $<HTMLButtonElement>("undo");
   const redo = $<HTMLButtonElement>("redo");
   const paintSettings = wireSettings(editor, closeMenu);
   editor.on("view", (v) => {
     panel.setSource(v);
     paintSettings(v);
-    textView.refresh();
+    textModal.refresh();
     if (hintState.limited !== (v.config.engine !== "tala")) {
       hintState.limited = v.config.engine !== "tala";
       paintHint();
@@ -143,11 +134,18 @@ function wireCanvas(editor: Editor, chrome: Chrome): void {
   editor.on("zoom", (scale) => {
     $("zoom-level").textContent = `${Math.round(scale * 100)}%`;
   });
+  const paintArrange = (): void => {
+    const id = editor.selected;
+    const shapes = editor.view?.shapes ?? [];
+    const saved = id !== "" && shapes.some((s) => s.pinned && s.id !== id && within(s.id, id));
+    $("tidy").hidden = !saved;
+    $("tidy").textContent = saved ? `Auto-arrange ${editor.label(id)}` : "Auto-arrange";
+    $("reset").hidden = !shapes.some((s) => s.pinned);
+  };
+  editor.on("view", paintArrange);
   editor.on("select", (id) => {
     $("dir-label").textContent = id ? `Direction inside ${editor.label(id)}` : "Layout direction";
-    const group = id !== "" && !!editor.view?.shapes.some((s) => parentOf(s.id) === id);
-    $("tidy").hidden = !group;
-    $("tidy").textContent = group ? `Tidy up ${editor.label(id)}` : "Tidy up";
+    paintArrange();
   });
   $("tidy").onclick = () => {
     closeMenu();
@@ -412,6 +410,7 @@ export async function start(): Promise<void> {
   const base = import.meta.env.BASE_URL;
   const info = import.meta.env.MODE === "production" ? null : await probeServe(base);
   const engine: Engine = info ? new HttpEngine(base) : await createWasmEngine();
+  setCatalog(await engine.catalog());
   const toasts = mountToasts($("toast"));
   const phone = matchMedia(PHONE);
   let editor: Editor | null = null;
@@ -439,10 +438,10 @@ export async function start(): Promise<void> {
   window.editor = editor;
   phone.addEventListener("change", () => layout(false));
   layout(false);
-  const text = mountTextView($("text-view"), engine, toasts);
-  wireCanvas(editor, { panel, toasts, textView: text });
-  wireViewToggle(text, editor);
-  wireExport(engine, toasts, () => (info ? info.file.replace(/\.[^.]+$/, "") : "diagram"));
+  const exportName = () => (info ? info.file.replace(/\.[^.]+$/, "") : "diagram");
+  const textModal = mountTextModal($("text-modal"), engine, toasts, exportName);
+  wireCanvas(editor, { panel, toasts, textModal });
+  wireExport(engine, toasts, textModal, () => (info ? info.file.replace(/\.[^.]+$/, "") : "diagram"));
   if (info) {
     $("tagline").hidden = true;
     const name = document.createElement("span");

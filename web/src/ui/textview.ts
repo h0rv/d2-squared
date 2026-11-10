@@ -1,57 +1,63 @@
+import { catalog } from "../app/catalog";
+import { download } from "../app/export";
 import type { Engine } from "../engine/engine";
-import type { Toasts } from "./toast";
 import { store } from "./store";
+import type { Toasts } from "./toast";
 
 const BASE_SIZE = 13;
 const MIN_SIZE = 10;
 const PAD = 24;
-const KEY = "d2sq.text.unicode";
+const KEY = "d2sq.text.charset";
 
-export const unicodePreferred = (): boolean => store.get(KEY) !== "0";
-
-export interface TextView {
-  readonly active: boolean;
-  setActive(active: boolean): void;
+export interface TextModal {
+  readonly isOpen: boolean;
+  open(): void;
+  close(): void;
   refresh(): void;
 }
 
-export function mountTextView(root: HTMLElement, engine: Engine, toasts: Toasts): TextView {
+export function mountTextModal(root: HTMLElement, engine: Engine, toasts: Toasts, name: () => string): TextModal {
   const $ = <T extends HTMLElement>(id: string): T => root.querySelector<T>(`#${id}`)!;
+  const view = $("text-view");
   const out = $("text-out");
   const scroll = $("text-scroll");
   const note = $("text-note");
-  const unicode = $("text-unicode");
-  const ascii = $("text-ascii");
-  let active = false;
+  const switcher = $("text-charset");
+  let opened = false;
   let seq = 0;
   let text = "";
 
+  const charset = (): string => {
+    const ids = catalog().charsets.map((c) => c.id);
+    const saved = store.get(KEY);
+    return saved && ids.includes(saved) ? saved : (ids[0] ?? "unicode");
+  };
+
   function fit(): void {
-    root.style.removeProperty("--text-size");
-    if (!active || root.classList.contains("failed")) return;
+    view.style.removeProperty("--text-size");
+    if (!opened || view.classList.contains("failed")) return;
     const ratio = Math.min(
       (scroll.clientWidth - 2 * PAD) / (out.offsetWidth - 2 * PAD),
       (scroll.clientHeight - 2 * PAD) / (out.offsetHeight - 2 * PAD),
     );
-    if (ratio < 1) root.style.setProperty("--text-size", `${Math.max(MIN_SIZE, Math.floor(BASE_SIZE * ratio))}px`);
+    if (ratio < 1) view.style.setProperty("--text-size", `${Math.max(MIN_SIZE, Math.floor(BASE_SIZE * ratio))}px`);
   }
 
   function paintCharset(): void {
-    const on = unicodePreferred();
-    unicode.setAttribute("aria-checked", String(on));
-    ascii.setAttribute("aria-checked", String(!on));
+    for (const button of switcher.querySelectorAll("button"))
+      button.setAttribute("aria-checked", String(button.dataset["charset"] === charset()));
   }
 
   function refresh(): void {
-    if (!active) return;
+    if (!opened) return;
     const mine = ++seq;
-    engine.text(unicodePreferred()).then(
+    engine.text(charset() === "unicode").then(
       (res) => {
         if (mine !== seq) return;
         text = res.text;
         out.textContent = res.text;
         note.textContent = res.note;
-        root.classList.remove("failed");
+        view.classList.remove("failed");
         fit();
       },
       (err: unknown) => {
@@ -59,7 +65,7 @@ export function mountTextView(root: HTMLElement, engine: Engine, toasts: Toasts)
         text = "";
         out.textContent = err instanceof Error ? err.message : "This diagram can't be shown as text.";
         note.textContent = "";
-        root.classList.add("failed");
+        view.classList.add("failed");
         fit();
       },
     );
@@ -70,7 +76,6 @@ export function mountTextView(root: HTMLElement, engine: Engine, toasts: Toasts)
     try {
       await navigator.clipboard.writeText(text);
       toasts.show("Copied");
-      return;
     } catch {
       const area = document.createElement("textarea");
       area.value = text;
@@ -81,34 +86,62 @@ export function mountTextView(root: HTMLElement, engine: Engine, toasts: Toasts)
       const ok = document.execCommand("copy");
       area.remove();
       if (ok) toasts.show("Copied");
-      else
-        toasts.show("Couldn't copy. Select the text and copy it yourself.", {
-          error: true,
-        });
+      else toasts.show("Couldn't copy. Select the text and copy it yourself.", { error: true });
     }
   }
 
-  const choose = (on: boolean): void => {
-    store.set(KEY, on ? "1" : "0");
-    paintCharset();
-    refresh();
-  };
-  unicode.onclick = () => choose(true);
-  ascii.onclick = () => choose(false);
+  function close(): void {
+    if (!opened) return;
+    opened = false;
+    root.hidden = true;
+  }
+
+  switcher.replaceChildren(
+    ...catalog().charsets.map((c) => {
+      const button = document.createElement("button");
+      button.className = "seg-btn";
+      button.setAttribute("role", "radio");
+      button.dataset["charset"] = c.id;
+      button.textContent = c.name;
+      button.onclick = () => {
+        store.set(KEY, c.id);
+        paintCharset();
+        refresh();
+      };
+      return button;
+    }),
+  );
   $("text-copy").onclick = () => void copy();
-  paintCharset();
+  $("text-download").onclick = () => {
+    if (text) download(`${name()}.txt`, new Blob([text], { type: "text/plain;charset=utf-8" }));
+  };
+  root.addEventListener("pointerdown", (e) => {
+    if (e.target === root) close();
+  });
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (!opened || e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+    },
+    true,
+  );
   new ResizeObserver(fit).observe(scroll);
 
   return {
-    get active() {
-      return active;
+    get isOpen() {
+      return opened;
     },
-    setActive(next) {
-      active = next;
-      root.hidden = !next;
-      document.body.classList.toggle("text-mode", next);
-      if (next) refresh();
+    open() {
+      opened = true;
+      root.hidden = false;
+      paintCharset();
+      view.focus();
+      refresh();
     },
+    close,
     refresh,
   };
 }

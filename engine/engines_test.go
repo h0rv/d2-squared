@@ -232,11 +232,11 @@ func TestConfigWrites(t *testing.T) {
 					t.Fatalf("%+v", cfg)
 				}
 			case "theme-id":
-				if cfg.ThemeID != 4 {
+				if cfg.ThemeID == nil || *cfg.ThemeID != 4 {
 					t.Fatalf("%+v", cfg)
 				}
 			case "dark-theme-id":
-				if cfg.DarkThemeID != 201 {
+				if cfg.DarkThemeID == nil || *cfg.DarkThemeID != 201 {
 					t.Fatalf("%+v", cfg)
 				}
 			}
@@ -247,11 +247,43 @@ func TestConfigWrites(t *testing.T) {
 			t.Fatalf("%v should be rejected", bad)
 		}
 	}
-	if cfg, err := readConfig("a -> b\n"); err != nil || cfg != (Config{Engine: engineTala, ThemeID: 0, DarkThemeID: 200}) {
+	if cfg, err := readConfig("a -> b\n"); err != nil || cfg != (Config{Engine: engineTala}) {
 		t.Fatalf("defaults: %+v %v", cfg, err)
 	}
 	if _, err := readConfig("vars: {d2-config: {layout-engine: grid}}\na -> b\n"); err == nil {
 		t.Fatal("an unknown engine should be an error")
+	}
+}
+
+func TestEmptyThemeRemovesTheKeys(t *testing.T) {
+	src, err := setConfig("a -> b\n", "theme-id", "4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err = setConfig(src, "dark-theme-id", "201")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err = setConfig(src, "theme-id", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := readConfig(src); cfg.ThemeID != nil || cfg.DarkThemeID == nil {
+		t.Fatalf("%+v\n%s", cfg, src)
+	}
+	src, err = setConfig(src, "dark-theme-id", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src != "a -> b\n" {
+		t.Fatalf("%q", src)
+	}
+}
+
+func TestDescribeListsD2Themes(t *testing.T) {
+	c := Describe()
+	if len(c.Themes) < 10 || len(c.DarkThemes) < 2 || len(c.Engines) != 3 || len(c.Charsets) != 2 {
+		t.Fatalf("%+v", c)
 	}
 }
 
@@ -262,7 +294,7 @@ func TestConfigEditsAreUndoable(t *testing.T) {
 	h.mustCommit(Edit{Kind: "config", Key: "theme-id", To: "4"})
 	h.mustCommit(Edit{Kind: "config", Key: "dark-theme-id", To: "201"})
 	cfg := h.view().Config
-	if !cfg.Sketch || cfg.ThemeID != 4 || cfg.DarkThemeID != 201 {
+	if !cfg.Sketch || cfg.ThemeID == nil || *cfg.ThemeID != 4 || cfg.DarkThemeID == nil || *cfg.DarkThemeID != 201 {
 		t.Fatalf("%+v", cfg)
 	}
 	for range 3 {

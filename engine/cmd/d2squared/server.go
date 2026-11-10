@@ -113,6 +113,10 @@ func (s *server) info(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]string{"mode": "serve", "file": filepath.Base(s.file)})
 }
 
+func (s *server) catalog(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, engine.Describe())
+}
+
 func (s *server) view(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 	v := s.session.Snapshot()
@@ -255,6 +259,7 @@ func (s *server) routes(ui fs.FS) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(ui))
 	mux.HandleFunc("GET /api/info", s.info)
+	mux.HandleFunc("GET /api/catalog", s.catalog)
 	mux.HandleFunc("GET /api/view", s.view)
 	mux.HandleFunc("POST /api/preview", s.preview)
 	mux.HandleFunc("POST /api/candidate", s.candidate)
