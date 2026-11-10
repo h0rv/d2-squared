@@ -14,7 +14,7 @@ export function describeConfig(e: Edit): string {
     case "theme-id":
       return `Theme: ${to === "" ? "Default" : (themes.find((t) => String(t.id) === to)?.name ?? to)}`;
     case "dark-theme-id":
-      return `Dark theme: ${to === "" ? "None" : (darkThemes.find((t) => String(t.id) === to)?.name ?? to)}`;
+      return `Dark theme: ${to === "" ? "Default (Dark Mauve)" : (darkThemes.find((t) => String(t.id) === to)?.name ?? to)}`;
     default:
       return "Settings changed";
   }

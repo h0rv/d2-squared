@@ -47,6 +47,13 @@ type Catalog struct {
 	Charsets   []Choice      `json:"charsets"`
 }
 
+func (c Config) darkTheme() *int64 {
+	if c.DarkThemeID != nil {
+		return c.DarkThemeID
+	}
+	return &d2themescatalog.DarkMauve.ID
+}
+
 func themeChoices(themes []d2themes.Theme) []ThemeChoice {
 	out := make([]ThemeChoice, 0, len(themes))
 	for _, t := range themes {

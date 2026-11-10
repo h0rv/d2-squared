@@ -41,7 +41,6 @@ func TestExportSVG(t *testing.T) {
 	for _, engine := range allEngines {
 		t.Run(engine, func(t *testing.T) {
 			h := withEngine(t, "../examples/architecture.d2", engine)
-			h.mustCommit(Edit{Kind: "config", Key: "dark-theme-id", To: "200"})
 			light, err := h.session.ExportSVG(h.ctx(), false)
 			if err != nil {
 				t.Fatal(err)

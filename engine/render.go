@@ -65,10 +65,10 @@ func renderSVG(ctx context.Context, source string, dark bool, seeds []int64) ([]
 		return nil, err
 	}
 	theme := cfg.ThemeID
-	if dark && cfg.DarkThemeID != nil {
-		theme = cfg.DarkThemeID
+	if dark {
+		theme = cfg.darkTheme()
 	}
-	diagram, _, opts, err := compileSource(ctx, source, cfg, engineLayout(seeds)(cfg), theme, nil)
+	diagram, _, opts, err := compileSource(ctx, source, cfg, engineLayout(seeds)(cfg), theme, cfg.darkTheme())
 	if err != nil {
 		return nil, err
 	}

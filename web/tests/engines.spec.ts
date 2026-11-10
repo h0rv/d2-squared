@@ -145,7 +145,7 @@ test("engines: theme pickers list D2's themes, write one key each and say which 
   const d = await open(page);
   await page.click("#more");
   expect(await page.locator("#theme option").count()).toBeGreaterThan(10);
-  await expect(page.locator("#dark-theme option")).toHaveText(["None", "Dark Mauve", "Dark Flagship Terrastruct"]);
+  await expect(page.locator("#dark-theme option")).toHaveText(["Default (Dark Mauve)", "Dark Mauve", "Dark Flagship Terrastruct"]);
   await expect(page.locator("#theme-use")).toBeVisible();
   await expect(page.locator("#dark-theme-use")).toBeHidden();
   await page.selectOption("#theme", { label: "Cool Classics" });
@@ -167,7 +167,7 @@ test("engines: theme pickers list D2's themes, write one key each and say which 
   await page.click("#more");
   await expect(page.locator("#dark-theme-use")).toBeVisible();
   await expect(page.locator("#theme-use")).toBeHidden();
-  await page.selectOption("#dark-theme", { label: "None" });
+  await page.selectOption("#dark-theme", { label: "Default (Dark Mauve)" });
   await d.idle();
   expect(await d.source()).not.toMatch(/dark-theme-id/);
   await page.click("#more");

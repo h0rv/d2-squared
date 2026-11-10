@@ -175,7 +175,7 @@ func layoutWith(ctx context.Context, source string, plan layoutPlan) (*Layout, e
 	if err != nil {
 		return nil, err
 	}
-	diagram, g, renderOpts, err := compileSource(ctx, source, cfg, plan(cfg), cfg.ThemeID, cfg.DarkThemeID)
+	diagram, g, renderOpts, err := compileSource(ctx, source, cfg, plan(cfg), cfg.ThemeID, cfg.darkTheme())
 	if err != nil {
 		return nil, err
 	}

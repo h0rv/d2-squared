@@ -36,7 +36,7 @@ export function wireSettings(editor: Editor, closeMenu: () => void): (view: View
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   let config: Config | null = null;
   fill(theme, "Default", themes);
-  fill(dark, "None", darkThemes);
+  fill(dark, "Default (Dark Mauve)", darkThemes);
 
   const paintUse = (): void => {
     const night = scheme.matches;
