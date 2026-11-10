@@ -317,3 +317,24 @@ for (const fixture of ["sized.d2", "arch.d2"]) {
     }
   });
 }
+
+test("serve: dropping, pasting and the Open your own chip are off", async ({ page, serve }) => {
+  const served = await serve("arch.d2");
+  await open(page, served.url);
+  const before = served.source();
+  await page.evaluate(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(["a -> b\n"], "other.d2"));
+    window.dispatchEvent(new DragEvent("dragenter", { dataTransfer: data, bubbles: true, cancelable: true }));
+    window.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { getData: () => "a -> b\n" } });
+    document.body.dispatchEvent(paste);
+  });
+  await sleep(600);
+  await expect(page.locator("#drop")).toBeHidden();
+  await expect(page.locator("#toast")).toBeHidden();
+  await expect(page.locator("#open-own")).toHaveCount(0);
+  await expect(page.locator("#hint")).not.toContainText("Drop your own");
+  expect(served.source()).toBe(before);
+});

@@ -18,7 +18,7 @@ You can also:
 
 ## Try it
 
-- Open the site: https://horv.co/d2-squared/. Nothing to install. It runs in your browser.
+- Open the site: https://horv.co/d2-squared/. Nothing to install. It runs in your browser. Drop your own .d2 file on the page, or paste D2 text.
 - Or edit a file on your machine:
 
 ```sh

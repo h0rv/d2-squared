@@ -206,16 +206,17 @@ function wireMenu(): void {
 }
 
 const HINT_TEXT = "Drag a box into another group, or drag an arrow's end onto another box";
+const HINT_SITE = "Drag a box into another group. Drop your own .d2 file here to try it.";
 const HINT_SHORT = "Drag a box into a group";
 const HINT_LIMITED = PLACING_NEEDS_TALA;
 
-const hintState = { armed: false, limited: false };
+const hintState = { armed: false, limited: false, site: false };
 const narrow = window.matchMedia(PHONE);
 
 function paintHint(): void {
   const hint = $("hint");
   const wanted = hintState.armed && (hintState.limited || store.get(HINT_KEY) !== "1");
-  hint.textContent = hintState.limited ? HINT_LIMITED : narrow.matches ? HINT_SHORT : HINT_TEXT;
+  hint.textContent = hintState.limited ? HINT_LIMITED : narrow.matches ? HINT_SHORT : hintState.site ? HINT_SITE : HINT_TEXT;
   hint.hidden = !wanted;
   hint.classList.toggle("gone", !wanted);
   document.body.classList.toggle("hint-on", wanted);
@@ -250,8 +251,15 @@ function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custo
     for (const chip of chips.querySelectorAll<HTMLButtonElement>("button"))
       chip.setAttribute("aria-checked", String(chip.dataset["example"] === id));
   };
+  const own = document.createElement("button");
+  own.type = "button";
+  own.className = "chip-btn";
+  own.id = "open-own";
+  own.textContent = "Open your own";
+  own.dataset["tip"] = "Open a .d2 file. You can also drop a file here or paste D2.";
+  const ownOption = new Option("Open your own…", "own");
   const addExample = (id: string, title: string): void => {
-    select.add(new Option(title, id));
+    select.add(new Option(title, id), ownOption);
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "chip-btn";
@@ -260,7 +268,7 @@ function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custo
     chip.textContent = title;
     chip.setAttribute("aria-checked", "false");
     chip.onclick = () => select.value !== id && pick(id);
-    chips.append(chip);
+    chips.insertBefore(chip, own);
   };
   const load = async (source: string): Promise<void> => {
     toasts.busy("Laying out the diagram…");
@@ -282,19 +290,96 @@ function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custo
     addExample("custom", title);
     choose("custom");
   };
+  chips.append(own);
+  select.add(ownOption);
   for (const ex of EXAMPLES) addExample(ex.id, ex.title);
-  select.onchange = () => pick(select.value);
+  select.onchange = () => {
+    if (select.value !== "own") return pick(select.value);
+    select.value = chips.querySelector('[aria-checked="true"]')?.getAttribute("data-example") ?? EXAMPLES[0]!.id;
+    void openFile();
+  };
   $("examples").hidden = false;
+  hintState.site = true;
+  paintHint();
   if (state.custom) addCustom("Shared diagram");
   else choose(EXAMPLES[0]!.id);
 
-  $("open").onclick = async () => {
-    closeMenu();
-    const file = await local.open();
-    if (!file) return;
-    addCustom(file.name);
-    await load(file.text);
+  const replaceWith = async (title: string, source: string, message: string): Promise<void> => {
+    const previous = editor.view?.source ?? "";
+    const before = chips.querySelector<HTMLElement>('[aria-checked="true"]')?.dataset["example"] ?? EXAMPLES[0]!.id;
+    const beforeTitle = chips.querySelector<HTMLElement>('[data-example="custom"]')?.textContent ?? title;
+    try {
+      await load(source);
+    } catch (err) {
+      toasts.show(err instanceof Error && err.message ? err.message : "That is not a D2 diagram.", { error: true, ms: 6000 });
+      return;
+    }
+    addCustom(title);
+    dismissHint();
+    toasts.show(message, {
+      action: {
+        label: "Undo",
+        run: () => {
+          if (before === "custom") addCustom(beforeTitle);
+          else {
+            for (const node of document.querySelectorAll('[data-example="custom"], option[value="custom"]')) node.remove();
+            choose(before);
+          }
+          void load(previous);
+        },
+      },
+    });
   };
+  const openFile = async (): Promise<void> => {
+    const file = await local.open();
+    if (file) await replaceWith(file.name, file.text, `Opened ${file.name}`);
+  };
+  $("open").onclick = () => {
+    closeMenu();
+    void openFile();
+  };
+  own.onclick = () => void openFile();
+  const overlay = $("drop");
+  let depth = 0;
+  const carriesFiles = (e: DragEvent): boolean => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
+  const hideDrop = (): void => {
+    depth = 0;
+    overlay.hidden = true;
+  };
+  window.addEventListener("dragenter", (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    depth += 1;
+    overlay.hidden = false;
+  });
+  window.addEventListener("dragover", (e) => {
+    if (carriesFiles(e)) e.preventDefault();
+  });
+  window.addEventListener("dragleave", (e) => {
+    if (!carriesFiles(e)) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) overlay.hidden = true;
+  });
+  window.addEventListener("drop", async (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    hideDrop();
+    const file = e.dataTransfer?.files[0];
+    if (!file) return;
+    if (!/\.(d2|txt)$/i.test(file.name)) {
+      toasts.show("Drop a .d2 or .txt file.", { error: true });
+      return;
+    }
+    await replaceWith(file.name, await file.text(), `Opened ${file.name}`);
+  });
+  document.addEventListener("paste", async (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (target?.closest("input, textarea, select, [contenteditable], #code")) return;
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (!text.trim()) return;
+    e.preventDefault();
+    await replaceWith("Pasted diagram", text, "Pasted your diagram");
+  });
   $("save").onclick = async () => {
     closeMenu();
     const name = await local.save(editor.view?.source ?? "");

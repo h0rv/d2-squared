@@ -1237,3 +1237,29 @@ body[data-ready] #editor {
     transition-delay: 0s !important;
   }
 }
+
+.drop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--solid) 72%, transparent);
+  border: 2px dashed var(--border);
+  pointer-events: none;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.drop[hidden] {
+  display: none;
+}
+
+.drop .chip {
+  padding: 14px 24px;
+}
+
+#open-own {
+  position: relative;
+}
