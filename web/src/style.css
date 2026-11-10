@@ -234,7 +234,7 @@ select {
   align-items: center;
   gap: 10px;
   height: 40px;
-  padding: 0 4px 0 14px;
+  padding: 0 4px 0 7px;
 }
 
 .logo {
@@ -243,9 +243,10 @@ select {
   letter-spacing: 0.01em;
 }
 
-.logo sup {
-  font-size: 0.65em;
-  margin-left: 1px;
+.logo .mark {
+  display: block;
+  width: 26px;
+  height: 26px;
 }
 
 .filename {
