@@ -20,3 +20,5 @@ interface D2SquaredApi {
 
 declare var d2squared: D2SquaredApi;
 declare var d2squaredReady: (() => void) | undefined;
+
+declare module "*/wasm_exec.js";

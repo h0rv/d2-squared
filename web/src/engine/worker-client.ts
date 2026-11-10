@@ -2,6 +2,7 @@ import { EngineError } from "./engine";
 
 type Outgoing =
   | { type: "ready" }
+  | { type: "failed"; error: string }
   | { type: "result"; id: number; ok: true; result: unknown }
   | { type: "result"; id: number; ok: false; error: string };
 
@@ -10,7 +11,13 @@ interface Pending {
   reject: (error: Error) => void;
 }
 
-export class WorkerClient {
+export interface EngineClient {
+  readonly ready: Promise<void>;
+  call<T>(op: keyof D2SquaredApi, ...args: unknown[]): Promise<T>;
+  terminate(): void;
+}
+
+export class WorkerClient implements EngineClient {
   private readonly worker: Worker;
   private readonly pending = new Map<number, Pending>();
   private next = 1;
@@ -24,6 +31,10 @@ export class WorkerClient {
         const msg = event.data;
         if (msg.type === "ready") {
           resolve();
+          return;
+        }
+        if (msg.type === "failed") {
+          reject(new Error(msg.error));
           return;
         }
         const entry = this.pending.get(msg.id);

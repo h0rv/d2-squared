@@ -2,10 +2,11 @@ import type { Candidate, Edit, Point, PreviewMessage, RouteResult, Target, TextR
 import { editId } from "../geometry";
 import { AsyncQueue } from "./async-queue";
 import { EngineError, type Engine } from "./engine";
-import { WorkerClient } from "./worker-client";
+import { InlineClient } from "./inline-client";
+import { WorkerClient, type EngineClient } from "./worker-client";
 
 interface Helper {
-  client: WorkerClient;
+  client: EngineClient;
   ready: boolean;
   source: string | null;
   version: number;
@@ -23,7 +24,7 @@ export function defaultWorkerCount(): number {
 export class WasmEngine implements Engine {
   readonly kind = "wasm";
   private readonly module: WebAssembly.Module;
-  private readonly primary: WorkerClient;
+  private readonly primary: EngineClient;
   private readonly size: number;
   private helpers: Helper[] = [];
   private helpersStarted = false;
@@ -32,16 +33,23 @@ export class WasmEngine implements Engine {
   private cache = new Map<string, Candidate>();
   private onPrimary = new Map<string, Promise<Candidate>>();
 
-  private constructor(module: WebAssembly.Module, size: number) {
+  private constructor(module: WebAssembly.Module, size: number, primary: EngineClient) {
     this.module = module;
     this.size = size;
-    this.primary = new WorkerClient(module);
+    this.primary = primary;
   }
 
   static async create(module: WebAssembly.Module, options: WasmEngineOptions = {}): Promise<WasmEngine> {
-    const engine = new WasmEngine(module, Math.max(1, options.workers ?? defaultWorkerCount()));
-    await engine.primary.ready;
-    return engine;
+    const worker = new WorkerClient(module);
+    try {
+      await worker.ready;
+      return new WasmEngine(module, Math.max(1, options.workers ?? defaultWorkerCount()), worker);
+    } catch {
+      worker.terminate();
+      const inline = new InlineClient(module);
+      await inline.ready;
+      return new WasmEngine(module, 1, inline);
+    }
   }
 
   get workerCount(): number {

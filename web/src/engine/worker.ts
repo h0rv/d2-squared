@@ -9,7 +9,7 @@ const ready = new Promise<void>((resolve) => {
 async function boot(module: WebAssembly.Module): Promise<void> {
   const go = new Go();
   const instance = await WebAssembly.instantiate(module, go.importObject);
-  void go.run(instance);
+  go.run(instance).catch((err: unknown) => self.postMessage({ type: "failed", error: err instanceof Error ? err.message : String(err) }));
   await ready;
   self.postMessage({ type: "ready" });
 }
