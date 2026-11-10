@@ -14,7 +14,7 @@ You can also:
 - Turn on sketch mode or pick a D2 theme.
 - Export SVG, PNG or text.
 
-![D2 squared after moving Billing into the Data group](docs/screenshot.png)
+![Dragging Billing into the Data group in D2 squared](docs/demo.gif)
 
 ## Try it
 

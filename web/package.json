@@ -18,11 +18,13 @@
     "test:wasm": "playwright test --project=wasm",
     "test:chrome": "playwright test --project=wasm --project=serve",
     "test:firefox": "playwright test --project=wasm-firefox --project=serve-firefox",
+    "demo": "node scripts/demo-gif.mjs",
     "test:webkit": "playwright test --project=wasm-webkit --project=serve-webkit"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",
     "@types/node": "^26.6.6",
+    "gifenc": "^1.0.3",
     "oxfmt": "^0.78.0",
     "oxlint": "^1.93.0",
     "typescript": "^7.0.2",
