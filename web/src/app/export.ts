@@ -1,3 +1,4 @@
+import { scheme } from "../ui/scheme";
 import type { Engine } from "../engine/engine";
 
 export type ExportKind = "svg" | "png";
@@ -51,7 +52,7 @@ async function rasterize(svg: string, dark: boolean): Promise<Blob> {
 }
 
 export async function exportAs(kind: ExportKind, engine: Engine, name: string): Promise<string> {
-  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = scheme() === "dark";
   const svg = await engine.exportSvg(dark);
   if (kind === "svg") {
     download(`${name}.svg`, new Blob([svg], { type: "image/svg+xml" }));

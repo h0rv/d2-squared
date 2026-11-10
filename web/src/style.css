@@ -37,8 +37,8 @@
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-scheme="dark"] {
+  & {
     --bg: #111218;
     --dot: rgba(255, 255, 255, 0.11);
     --paper: #111218;
@@ -1194,7 +1194,7 @@ body[data-ready] #editor {
   will-change: transform;
 }
 
-@media (prefers-color-scheme: dark) {
+:root[data-scheme="dark"] {
   .d2-tip {
     color: #0d1220;
   }
@@ -1242,18 +1242,4 @@ body[data-ready] #editor {
 
 #open-own {
   position: relative;
-}
-
-.use {
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--hover);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.use[hidden] {
-  display: none;
 }

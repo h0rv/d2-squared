@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
-import { Diagram, expectClean, sleep } from "./helpers";
+import { Diagram, expectClean, openMenu, sleep } from "./helpers";
 
 test.afterEach(expectClean);
 
@@ -14,7 +14,7 @@ async function open(page: Page): Promise<Diagram> {
 }
 
 async function menu(page: Page, selector: string): Promise<void> {
-  await page.click("#more");
+  await openMenu(page);
   await page.click(selector);
 }
 
@@ -71,7 +71,7 @@ test("engines: with dagre, placing and resizing are off and say why", async ({ p
 });
 
 async function openText(page: Page): Promise<void> {
-  await page.click("#more");
+  await openMenu(page);
   await page.click("#text-export");
   await expect(page.locator("#text-modal")).toBeVisible();
 }
@@ -128,7 +128,7 @@ test("engines: sketch and theme are written to the file", async ({ page }) => {
   await d.idle();
   expect(await d.source()).toMatch(/sketch: true/);
   expect(await page.evaluate(() => window.editor!.view!.config.sketch)).toBe(true);
-  await page.click("#more");
+  await openMenu(page);
   await expect(page.locator("#sketch")).toHaveAttribute("aria-checked", "true");
   await page.selectOption("#theme", { label: "Cool Classics" });
   await expect(page.locator("#toast")).toContainText("Theme: Cool Classics");
@@ -141,43 +141,57 @@ test("engines: sketch and theme are written to the file", async ({ page }) => {
   expect(await d.source()).not.toMatch(/sketch: true/);
 });
 
-test("engines: theme pickers list D2's themes, write one key each and say which is in use", async ({ page }) => {
+test("engines: one theme list sets the light or dark theme and switches the mode to show it", async ({ page }) => {
   const d = await open(page);
-  await page.click("#more");
-  expect(await page.locator("#theme option").count()).toBeGreaterThan(10);
-  await expect(page.locator("#dark-theme option")).toHaveText(["Default (Dark Mauve)", "Dark Mauve", "Dark Flagship Terrastruct"]);
-  await expect(page.locator("#theme-use")).toBeVisible();
-  await expect(page.locator("#dark-theme-use")).toBeHidden();
+  await page.evaluate(() => localStorage.removeItem("d2sq.scheme"));
+  await openMenu(page);
+  const groups = page.locator("#theme optgroup");
+  await expect(groups).toHaveCount(2);
+  expect(await groups.nth(0).locator("option").count()).toBeGreaterThan(10);
+  await expect(groups.nth(1).locator("option")).toHaveText(["Default (Dark Mauve)", "Dark Flagship Terrastruct"]);
   await page.selectOption("#theme", { label: "Cool Classics" });
   await expect(page.locator("#toast")).toContainText("Theme: Cool Classics");
   await d.idle();
   expect(await d.source()).toMatch(/theme-id: 4/);
   expect(await d.source()).not.toMatch(/dark-theme-id/);
-  await page.click("#more");
-  await page.selectOption("#theme", { label: "Default" });
-  await expect(page.locator("#toast")).toContainText("Theme: Default");
+  await expect(page.locator("#menu")).toBeVisible();
+  await page.selectOption("#theme", { label: "Dark Flagship Terrastruct" });
   await d.idle();
-  expect(await d.source()).not.toMatch(/theme-id/);
-  await page.click("#more");
-  await page.selectOption("#dark-theme", { label: "Dark Mauve" });
-  await expect(page.locator("#toast")).toContainText("Dark theme: Dark Mauve");
-  await d.idle();
-  expect(await d.source()).toMatch(/dark-theme-id: 200/);
-  await page.emulateMedia({ colorScheme: "dark" });
-  await page.click("#more");
-  await expect(page.locator("#dark-theme-use")).toBeVisible();
-  await expect(page.locator("#theme-use")).toBeHidden();
-  await page.selectOption("#dark-theme", { label: "Default (Dark Mauve)" });
+  expect(await d.source()).toMatch(/dark-theme-id: 201/);
+  await expect(page.locator("html")).toHaveAttribute("data-scheme", "dark");
+  await expect(page.locator("#theme")).toHaveValue("dark:201");
+  await page.click("#scheme");
+  await expect(page.locator("html")).toHaveAttribute("data-scheme", "light");
+  await expect(page.locator("#theme")).toHaveValue("light:4");
+  await openMenu(page);
+  await page.selectOption("#theme", { label: "Default (Dark Mauve)" });
   await d.idle();
   expect(await d.source()).not.toMatch(/dark-theme-id/);
-  await page.click("#more");
-  await expect(page.locator("#theme-use")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-scheme", "dark");
+});
+
+test("engines: the mode switch recolors the diagram without editing the file", async ({ page }) => {
+  const d = await open(page);
+  const before = await d.source();
+  const fill = () =>
+    page.evaluate(() => {
+      const el = document.querySelector("[data-id] .shape rect, [data-id] .shape path");
+      return el ? getComputedStyle(el).fill : "";
+    });
+  await page.evaluate(() => localStorage.setItem("d2sq.scheme", "light"));
+  await page.reload();
+  await d.idle();
+  const light = await fill();
+  await page.click("#scheme");
+  await expect(page.locator("html")).toHaveAttribute("data-scheme", "dark");
+  await expect.poll(fill).not.toBe(light);
+  expect(await d.source()).toBe(before);
 });
 
 test("engines: export as SVG and PNG downloads files", async ({ page }) => {
   await open(page);
   const get = async (kind: string) => {
-    await page.click("#more");
+    await openMenu(page);
     const [download] = await Promise.all([page.waitForEvent("download"), page.click(`[data-export="${kind}"]`)]);
     const path = await download.path();
     expect(statSync(path).size).toBeGreaterThan(100);

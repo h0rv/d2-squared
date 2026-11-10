@@ -1,3 +1,4 @@
+import { schemeCss } from "../ui/scheme";
 import { depth, parentOf } from "../geometry";
 import { svgEl } from "../svg";
 import type { Point, View } from "../types";
@@ -76,7 +77,8 @@ export function mountScene(scene: SVGSVGElement) {
   }
 
   function sync(v: View, prev: View | null, floating: Map<string, { dx: number; dy: number }>): void {
-    const { css, defs } = v.scene;
+    const css = schemeCss(v.scene.css);
+    const { defs } = v.scene;
     if (styleEl.textContent !== css) styleEl.textContent = css;
     if (defsEl.dataset["defs"] !== defs) {
       defsEl.innerHTML = defs;

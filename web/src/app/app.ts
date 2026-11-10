@@ -106,7 +106,7 @@ function wireCanvas(editor: Editor, chrome: Chrome): void {
   const { panel, toasts, textModal } = chrome;
   const undo = $<HTMLButtonElement>("undo");
   const redo = $<HTMLButtonElement>("redo");
-  const paintSettings = wireSettings(editor, closeMenu);
+  const paintSettings = wireSettings(editor);
   editor.on("view", (v) => {
     panel.setSource(v);
     paintSettings(v);
@@ -162,7 +162,6 @@ function wireCanvas(editor: Editor, chrome: Chrome): void {
   };
   for (const button of document.querySelectorAll<HTMLElement>("[data-dir]")) {
     button.onclick = () => {
-      closeMenu();
       void editor.send({ kind: "direction", key: editor.selected, to: button.dataset["dir"] ?? "" });
     };
   }

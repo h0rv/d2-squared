@@ -45,6 +45,8 @@ type Catalog struct {
 	DarkThemes []ThemeChoice `json:"darkThemes"`
 	Engines    []Choice      `json:"engines"`
 	Charsets   []Choice      `json:"charsets"`
+	Theme      int64         `json:"theme"`
+	DarkTheme  int64         `json:"darkTheme"`
 }
 
 func (c Config) darkTheme() *int64 {
@@ -68,6 +70,8 @@ func Describe() Catalog {
 		DarkThemes: themeChoices(d2themescatalog.DarkCatalog),
 		Engines:    []Choice{{engineTala, "TALA"}, {engineELK, "ELK"}, {engineDagre, "dagre"}},
 		Charsets:   []Choice{{"unicode", "Unicode"}, {"ascii", "ASCII"}},
+		Theme:      d2themescatalog.NeutralDefault.ID,
+		DarkTheme:  d2themescatalog.DarkMauve.ID,
 	}
 }
 

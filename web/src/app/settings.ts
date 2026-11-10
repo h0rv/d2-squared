@@ -1,6 +1,8 @@
 import type { Editor } from "../editor/editor";
 import type { Choice, Config, LayoutEngine, ThemeChoice, View } from "../types";
 import { catalog } from "./catalog";
+import { ICONS } from "../ui/icons";
+import { onScheme, scheme, setScheme, type Scheme } from "../ui/scheme";
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const node = document.getElementById(id);
@@ -8,8 +10,15 @@ const $ = <T extends HTMLElement>(id: string): T => {
   return node as T;
 };
 
-function fill(select: HTMLSelectElement, first: string, themes: ThemeChoice[]): void {
-  select.replaceChildren(new Option(first, ""), ...themes.map((t) => new Option(t.name, String(t.id))));
+function group(label: string, mode: Scheme, fallback: number, themes: ThemeChoice[]): HTMLOptGroupElement {
+  const node = document.createElement("optgroup");
+  node.label = label;
+  const named = themes.find((t) => t.id === fallback)?.name;
+  node.append(
+    new Option(named ? `Default (${named})` : "Default", `${mode}:`),
+    ...themes.filter((t) => t.id !== fallback).map((t) => new Option(t.name, `${mode}:${t.id}`)),
+  );
+  return node;
 }
 
 function engineButtons(host: HTMLElement, engines: Choice[]): HTMLElement[] {
@@ -27,51 +36,46 @@ function engineButtons(host: HTMLElement, engines: Choice[]): HTMLElement[] {
   return [...host.querySelectorAll<HTMLElement>("[data-engine]")];
 }
 
-export function wireSettings(editor: Editor, closeMenu: () => void): (view: View) => void {
+export function wireSettings(editor: Editor): (view: View) => void {
   const theme = $<HTMLSelectElement>("theme");
-  const dark = $<HTMLSelectElement>("dark-theme");
   const sketch = $("sketch");
-  const { themes, darkThemes, engines: choices } = catalog();
+  const toggle = $("scheme");
+  const { themes, darkThemes, engines: choices, theme: lightDefault, darkTheme: darkDefault } = catalog();
   const engines = engineButtons($("engines"), choices);
-  const scheme = matchMedia("(prefers-color-scheme: dark)");
   let config: Config | null = null;
-  fill(theme, "Default", themes);
-  fill(dark, "Default (Dark Mauve)", darkThemes);
+  theme.replaceChildren(group("Light", "light", lightDefault, themes), group("Dark", "dark", darkDefault, darkThemes));
 
-  const paintUse = (): void => {
-    const night = scheme.matches;
-    const darkSet = config?.darkThemeId !== undefined;
-    $("theme-use").hidden = night && darkSet;
-    $("dark-theme-use").hidden = !(night && darkSet);
+  const paintTheme = (): void => {
+    const mode = scheme();
+    const id = mode === "dark" ? config?.darkThemeId : config?.themeId;
+    theme.value = `${mode}:${id ?? ""}`;
+    const next = mode === "dark" ? "light" : "dark";
+    toggle.innerHTML = ICONS[mode === "dark" ? "sun" : "moon"];
+    toggle.setAttribute("aria-label", `Switch to ${next} mode`);
+    toggle.dataset["tip"] = `Switch to ${next} mode`;
   };
-  scheme.addEventListener("change", paintUse);
+  onScheme(paintTheme);
+  toggle.onclick = () => setScheme(scheme() === "dark" ? "light" : "dark");
 
   for (const button of engines) {
     button.onclick = () => {
-      closeMenu();
       const to = button.dataset["engine"] as LayoutEngine;
       if (editor.view?.config.engine !== to) void editor.send({ kind: "config", key: "layout-engine", to });
     };
   }
   sketch.onclick = () => {
-    closeMenu();
     void editor.send({ kind: "config", key: "sketch", to: String(sketch.getAttribute("aria-checked") !== "true") });
   };
   theme.onchange = () => {
-    closeMenu();
-    void editor.send({ kind: "config", key: "theme-id", to: theme.value });
-  };
-  dark.onchange = () => {
-    closeMenu();
-    void editor.send({ kind: "config", key: "dark-theme-id", to: dark.value });
+    const [mode, id = ""] = theme.value.split(":") as [Scheme, string];
+    setScheme(mode);
+    void editor.send({ kind: "config", key: mode === "dark" ? "dark-theme-id" : "theme-id", to: id });
   };
 
   return (view) => {
     config = view.config;
     for (const button of engines) button.setAttribute("aria-checked", String(button.dataset["engine"] === config.engine));
     sketch.setAttribute("aria-checked", String(config.sketch));
-    theme.value = config.themeId === undefined ? "" : String(config.themeId);
-    dark.value = config.darkThemeId === undefined ? "" : String(config.darkThemeId);
-    paintUse();
+    paintTheme();
   };
 }

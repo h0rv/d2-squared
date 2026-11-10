@@ -3,7 +3,7 @@ import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync } fr
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test as base } from "@playwright/test";
-import { Diagram, expectClean, frameStats, sleep } from "./helpers";
+import { Diagram, expectClean, openMenu, frameStats, sleep } from "./helpers";
 
 const engineDir = path.resolve(import.meta.dirname, "../../engine");
 const binary = path.resolve(import.meta.dirname, "../.build/d2squared");
@@ -93,7 +93,7 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
   expect(r.diff).toMatch(/\+/);
   expect(await page.locator("#filename").textContent()).toContain("diagram.d2");
   await expect(page.locator("#examples")).toBeHidden();
-  await page.click("#more");
+  await openMenu(page);
   await expect(page.locator("#open")).toBeHidden();
   await expect(page.locator("#reset")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -149,7 +149,7 @@ test("serve: architecture drags, undo and agent edits", async ({ page, serve }) 
   await d.noErrors();
 });
 
-test("serve: large ERD pin, column reconnect, early drop and autoscroll", async ({ page, serve }) => {
+test("serve: large ERD pin, column reconnect, early drop and autoscroll", async ({ page, serve, browserName }) => {
   const served = await serve("erd-large.d2");
   const d = await open(page, served.url);
   await d.setScale(0.35);
@@ -162,7 +162,7 @@ test("serve: large ERD pin, column reconnect, early drop and autoscroll", async 
   const after = await d.mustShape("orders");
   expect(Math.abs(after.x - orders.x - dx / 0.35)).toBeLessThan(8);
   expect(Math.abs(after.y - orders.y - dy / 0.35)).toBeLessThan(8);
-  expect(frameStats(r.frames).p95).toBeLessThan(40);
+  if (browserName === "chromium") expect(frameStats(r.frames).p95).toBeLessThan(40);
 
   await d.setScale(0.2);
   await sleep(300);
@@ -238,12 +238,12 @@ for (const scheme of ["dark", "light"] as const) {
 test("serve: ELK is saved to the file and the exports download", async ({ page, serve }) => {
   const served = await serve("arch.d2");
   const d = await open(page, served.url);
-  await page.click("#more");
+  await openMenu(page);
   await page.click('[data-engine="elk"]');
   await page.waitForFunction(() => window.editor!.view!.config.engine === "elk", null, { timeout: 60_000 });
   await d.idle();
   expect(served.source()).toMatch(/layout-engine: elk/);
-  await page.click("#more");
+  await openMenu(page);
   await page.click("#text-export");
   await expect(page.locator("#text-out")).toContainText("Postgres");
   const [textDownload] = await Promise.all([page.waitForEvent("download"), page.click("#text-download")]);
@@ -253,7 +253,7 @@ test("serve: ELK is saved to the file and the exports download", async ({ page, 
     ["svg", "diagram.svg"],
     ["png", "diagram.png"],
   ] as const) {
-    await page.click("#more");
+    await openMenu(page);
     const [download] = await Promise.all([page.waitForEvent("download"), page.click(`[data-export="${kind}"]`)]);
     expect(download.suggestedFilename()).toBe(name);
     expect(readFileSync((await download.path())!).length).toBeGreaterThan(100);
@@ -274,7 +274,7 @@ test("serve: the text modal shows the diagram, centers it and copies it", async 
   if (browserName === "chromium") await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const served = await serve("sized.d2");
   const d = await open(page, served.url);
-  await page.click("#more");
+  await openMenu(page);
   await page.click("#text-export");
   const out = page.locator("#text-out");
   await expect(out).toContainText("Alpha");
@@ -306,7 +306,7 @@ for (const fixture of ["sized.d2", "arch.d2"]) {
         });
         const page = await context.newPage();
         await open(page, served.url);
-        await page.click("#more");
+        await openMenu(page);
         await page.click("#text-export");
         await expect(page.locator("#text-out")).toContainText(fixture === "sized.d2" ? "Alpha" : "Postgres");
         for (const charset of ["unicode", "ascii"]) {

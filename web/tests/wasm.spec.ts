@@ -1,6 +1,6 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
-import { Diagram, expectClean, sleep } from "./helpers";
+import { Diagram, expectClean, openMenu, sleep } from "./helpers";
 
 const PAGE = "/d2-squared/";
 
@@ -127,7 +127,7 @@ test("wasm: editing the source and sharing a link", async ({ page, context, brow
   await page.click("#code-toggle");
   await page.fill("#code-input", "a: Alpha\nb: Beta\na -> b\n");
   await page.waitForFunction(() => window.editor?.view?.shapes.length === 2);
-  await page.click("#more");
+  await openMenu(page);
   await page.click("#share");
   await expect(page.locator("#toast")).toContainText("Link copied");
   await sleep(500);
@@ -370,7 +370,7 @@ test("wasm: auto-arrange a group drops its saved positions and keeps the rest", 
   const first = await diagram.mustShape("services");
   const nowhere = await diagram.at(first.x + 14, first.y + 14);
   await page.mouse.click(nowhere.x, nowhere.y);
-  await page.click("#more");
+  await openMenu(page);
   await expect(page.locator("#tidy")).toBeHidden();
   await expect(page.locator("#reset")).toBeHidden();
   await page.keyboard.press("Escape");
@@ -386,7 +386,7 @@ test("wasm: auto-arrange a group drops its saved positions and keeps the rest", 
   const inside = await diagram.at(group.x + 14, group.y + 14);
   await page.mouse.click(inside.x, inside.y);
   await expect(page.locator(".d2-action")).toHaveCount(0);
-  await page.click("#more");
+  await openMenu(page);
   const tidy = page.locator("#tidy");
   await expect(tidy).toHaveText("Auto-arrange Services");
   await expect(page.locator("#reset")).toHaveText("Auto-arrange everything");
@@ -401,7 +401,7 @@ test("wasm: auto-arrange a group drops its saved positions and keeps the rest", 
   expect(tidied).toMatch(/gateway: API gateway \{[^}]*left:/);
   const after = await diagram.mustShape("gateway");
   expect([after.x, after.y]).toEqual([gateway.x, gateway.y]);
-  await page.click("#more");
+  await openMenu(page);
   await page.keyboard.press("Escape");
   await page.screenshot({ path: "test-results/ux-v2/light-desktop-tidied.png" });
 });

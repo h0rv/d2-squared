@@ -1,6 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 import type { Point } from "../src/types";
 
+export async function openMenu(page: import("@playwright/test").Page): Promise<void> {
+  if ((await page.getAttribute("#more", "aria-expanded")) !== "true") await page.click("#more");
+}
+
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface DragOptions {

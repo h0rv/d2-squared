@@ -4,6 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        var s = localStorage.getItem("d2sq.scheme");
+        if (s !== "light" && s !== "dark") s = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.scheme = s;
+        document.documentElement.style.colorScheme = s;
+      } catch (e) {}
+    </script>
     <title>D2 squared</title>
     <meta name="description" content="D2 × Declarative Dragging. Drag D2 diagrams, and each drag is saved as an edit to the .d2 file." />
     <link
@@ -46,6 +54,7 @@
       <button id="undo" class="icon-btn" aria-label="Undo" data-tip="Undo" disabled></button>
       <button id="redo" class="icon-btn" aria-label="Redo" data-tip="Redo" disabled></button>
       <span class="sep"></span>
+      <button id="scheme" class="icon-btn" aria-label="Switch to dark mode" data-tip="Switch to dark mode"></button>
       <button id="code-toggle" class="btn" aria-pressed="false" aria-controls="code" aria-label="Code" data-tip="Show the D2 code"></button>
       <button id="more" class="icon-btn" aria-label="More" aria-haspopup="menu" aria-expanded="false" data-tip="More"></button>
     </div>
@@ -78,12 +87,8 @@
         <span>Sketch</span><span class="tick" aria-hidden="true"></span>
       </button>
       <div class="menu-row">
-        <label for="theme">Theme <span id="theme-use" class="use">in use</span></label>
+        <label for="theme">Theme</label>
         <select id="theme" class="menu-select"></select>
-      </div>
-      <div class="menu-row">
-        <label for="dark-theme">Dark theme <span id="dark-theme-use" class="use" hidden>in use</span></label>
-        <select id="dark-theme" class="menu-select"></select>
       </div>
       <h2 class="menu-head">Export</h2>
       <div class="menu-row flush" role="group" aria-label="Export">

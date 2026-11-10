@@ -90,6 +90,8 @@ export interface Catalog {
   darkThemes: ThemeChoice[];
   engines: Choice[];
   charsets: Choice[];
+  theme: number;
+  darkTheme: number;
 }
 
 export interface TextResult {
