@@ -5,7 +5,8 @@ test.afterEach(expectClean);
 
 const isWasm = (url: string): boolean => /\/d2squared\.[0-9a-f]+\.wasm$/.test(new URL(url).pathname);
 
-test("cache: the second load takes the engine from Cache Storage with no network", async ({ page }) => {
+test("cache: the second load takes the engine from Cache Storage with no network", async ({ page, browserName }) => {
+  test.skip(browserName === "webkit", "Playwright WebKit drops Cache Storage when the page navigates");
   const requests: string[] = [];
   page.on("request", (request) => {
     if (isWasm(request.url())) requests.push(request.url());

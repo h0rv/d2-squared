@@ -63,8 +63,8 @@ jobs:
         run: npm run build:embed
       - name: Install the browsers
         working-directory: web
-        run: npx playwright install --with-deps chromium firefox
-      - name: End-to-end tests (Chromium and Firefox)
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: End-to-end tests (Chromium, Firefox and WebKit)
         working-directory: web
         run: npm test
       - uses: actions/upload-artifact@v4.6.2

@@ -17,7 +17,8 @@
     "test:serve": "playwright test --project=serve",
     "test:wasm": "playwright test --project=wasm",
     "test:chrome": "playwright test --project=wasm --project=serve",
-    "test:firefox": "playwright test --project=wasm-firefox --project=serve-firefox"
+    "test:firefox": "playwright test --project=wasm-firefox --project=serve-firefox",
+    "test:webkit": "playwright test --project=wasm-webkit --project=serve-webkit"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.0",
