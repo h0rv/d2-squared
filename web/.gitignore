@@ -1,6 +1,6 @@
 node_modules
 dist
-public/d2squared.wasm
+public/d2squared*.wasm
 test-results
 playwright-report
 .build

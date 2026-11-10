@@ -14,9 +14,9 @@ export default defineConfig({
   reporter: [["list"]],
   use: { viewport },
   projects: [
-    { name: "wasm", testMatch: ["wasm.spec.ts", "engines.spec.ts"], use: { baseURL, ...chromium } },
+    { name: "wasm", testMatch: ["wasm.spec.ts", "engines.spec.ts", "cache.spec.ts"], use: { baseURL, ...chromium } },
     { name: "serve", testMatch: "serve.spec.ts", use: chromium },
-    { name: "wasm-firefox", testMatch: ["wasm.spec.ts", "engines.spec.ts"], use: { ...firefox, baseURL } },
+    { name: "wasm-firefox", testMatch: ["wasm.spec.ts", "engines.spec.ts", "cache.spec.ts"], use: { ...firefox, baseURL } },
     { name: "serve-firefox", testMatch: "serve.spec.ts", use: firefox },
   ],
   webServer: {

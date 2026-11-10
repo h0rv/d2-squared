@@ -21,6 +21,7 @@ const $ = <T extends HTMLElement>(id: string): T => {
 };
 
 declare const WASM_BYTES: number;
+declare const WASM_URL: string;
 
 const HINT_KEY = "d2sq.hint";
 const MOD = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
@@ -44,12 +45,15 @@ function hideLoading(): void {
 
 async function createWasmEngine(): Promise<Engine> {
   const [{ loadWasm }, { WasmEngine }] = await Promise.all([import("../engine/load-wasm"), import("../engine/wasm-engine")]);
-  showLoading("Loading the layout engine…", null);
-  const module = await loadWasm(`${import.meta.env.BASE_URL}d2squared.wasm`, (loaded, total) => {
-    const known = total || WASM_BYTES;
-    showLoading("Loading the layout engine…", known > 0 ? Math.min(loaded / known, 1) : null);
+  showLoading("Laying out the diagram…", null);
+  const { module } = await loadWasm(WASM_URL, {
+    onNetwork: () => showLoading("Loading the layout engine…", null),
+    onProgress: (loaded, total) => {
+      const known = total || WASM_BYTES;
+      showLoading("Loading the layout engine…", known > 0 ? Math.min(loaded / known, 1) : null);
+    },
   });
-  showLoading("Starting the layout engine…", null);
+  showLoading("Laying out the diagram…", null);
   const requested = Number(new URLSearchParams(location.search).get("workers"));
   return WasmEngine.create(module, requested > 0 ? { workers: requested } : {});
 }
