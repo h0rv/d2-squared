@@ -7,6 +7,13 @@ D2² (D2 squared) is D2 × D2. It combines two projects that are both called D2.
 
 Together they make D2 diagrams draggable. You can move a box into a group, drag the end of an arrow onto another box, or place a box where you want it. Each drag is saved as a small edit to your `.d2` file, so the text stays the source of truth.
 
+You can also:
+
+- Switch the layout engine between TALA, ELK and dagre.
+- See the diagram as text, in Unicode or ASCII.
+- Turn on sketch mode or pick a D2 theme.
+- Export SVG, PNG or text.
+
 ![D2 squared after moving Billing into the Data group](docs/screenshot.png)
 
 ## Try it
@@ -23,7 +30,7 @@ Then open http://127.0.0.1:8768. Drags are written to `diagram.d2`, and changes 
 
 ## How it works
 
-When you start a drag, D2² works out the edits that drag could make and lays out the result of each one. Drop zones appear where the dragged box would land. The panel shows the lines that would change. The layout you preview is the layout that is saved.
+When you start a drag, D2² works out the edits that drag could make and lays out the result of each one. The group you would drop into lights up. If the code panel is open, it shows the lines that would change. The layout you preview is the layout that is saved.
 
 Work is split into steps so the drag never waits.
 
@@ -42,9 +49,10 @@ In D2², each drag state is a version of the `.d2` file, e.g., the file with a b
 
 ## Limits
 
-- The browser engine is about 4 times slower than the native one, and it downloads about 9 MB once.
+- The browser engine is about 4 times slower than the native one, and it downloads about 12 MB once.
 - Small diagrams feel instant in the browser. A 36 table diagram takes a few seconds to open, so use `d2squared serve` for large ones.
-- The first edit saves a position for every box, so the file gets longer. Reset positions removes them.
+- The first edit saves a position for every box, so the file gets longer. Reset layout removes them.
+- Placing and resizing boxes need TALA. ELK and dagre ignore saved positions.
 
 ## Develop
 
