@@ -91,21 +91,32 @@ test("open: pasting into the code editor is left to the editor", async ({ page }
   expect(await source(page)).toBe(before);
 });
 
-test("open: the Open your own chip opens the file picker", async ({ page, browserName }) => {
+test("open: Open your own starts a blank diagram with the code panel ready", async ({ page }) => {
+  await ready(page);
+  await page.click("#open-own");
+  await expect(page.locator("#empty")).toBeVisible();
+  await expect(page.locator("#code-input")).toBeFocused();
+  await expect(page.locator("#code-input")).toHaveAttribute("placeholder", "Paste your D2 here");
+  expect(await source(page)).toBe("");
+  await page.keyboard.type("api -> db\n");
+  await expect(page.locator("#empty")).toBeHidden();
+  await expect.poll(() => source(page)).toContain("api -> db");
+});
+
+test("open: the blank diagram's upload button opens the file picker", async ({ page, browserName }) => {
   await page.addInitScript(() => {
     delete (window as unknown as { showOpenFilePicker?: unknown }).showOpenFilePicker;
   });
   await ready(page);
-  const chip = page.locator("#open-own");
-  await expect(chip).toHaveText("Open your own");
-  await expect(chip).toHaveAttribute("data-tip", "Open a .d2 file. You can also drop a file here or paste D2.");
+  await page.click("#open-own");
   const chooser = page.waitForEvent("filechooser");
-  await chip.click();
+  await page.click("#empty-upload");
   const picker = await chooser;
   if (browserName === "firefox") return;
   await picker.setFiles({ name: "picked.d2", mimeType: "text/plain", buffer: Buffer.from(MINE) });
   await expect(page.locator("#toast")).toContainText("Opened picked.d2");
   expect(await source(page)).toBe(MINE);
+  await expect(page.locator("#empty")).toBeHidden();
 });
 
 test("open: the first-visit hint mentions dropping a file", async ({ page }) => {

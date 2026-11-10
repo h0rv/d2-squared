@@ -1242,3 +1242,30 @@ body[data-ready] #editor {
 #open-own {
   position: relative;
 }
+
+.empty {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 5;
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  max-width: 340px;
+  padding: 24px 28px;
+  border-radius: 14px;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.empty[hidden] {
+  display: none;
+}
+
+.empty p {
+  margin: 0;
+}
+
+.empty-title {
+  font-weight: 600;
+}

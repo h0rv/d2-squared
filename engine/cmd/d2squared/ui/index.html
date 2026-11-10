@@ -95,6 +95,12 @@
 
     <div id="drop" class="drop" hidden><div class="surface chip">Drop your .d2 file to open it</div></div>
 
+    <div id="empty" class="surface empty" hidden>
+      <p class="empty-title">Start your own diagram</p>
+      <p>Paste or type D2 in the code panel.</p>
+      <button id="empty-upload" class="btn">Upload a .d2 file</button>
+      <p class="muted">You can also drop a .d2 file anywhere.</p>
+    </div>
     <div id="hint" class="surface chip hint" hidden>Drag a box into another group, or drag an arrow's end onto another box</div>
 
     <div id="zoom" class="surface zoom" role="group" aria-label="Zoom">
@@ -135,6 +141,7 @@
           <textarea
             id="code-input"
             class="code-input"
+            placeholder="Paste your D2 here"
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"

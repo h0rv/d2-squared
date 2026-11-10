@@ -237,7 +237,7 @@ function showHint(): void {
   paintHint();
 }
 
-function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custom: boolean }): void {
+function wireSite(engine: Engine, editor: Editor, toasts: Toasts, panel: CodePanel, state: { custom: boolean }): void {
   const open = engine.open?.bind(engine);
   if (!open) return;
   const local = new LocalFile();
@@ -253,7 +253,7 @@ function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custo
   own.className = "chip-btn";
   own.id = "open-own";
   own.textContent = "Open your own";
-  own.dataset["tip"] = "Open a .d2 file. You can also drop a file here or paste D2.";
+  own.dataset["tip"] = "Start a blank diagram: paste D2 or upload a file";
   const ownOption = new Option("Open your own…", "own");
   const addExample = (id: string, title: string): void => {
     select.add(new Option(title, id), ownOption);
@@ -292,8 +292,7 @@ function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custo
   for (const ex of EXAMPLES) addExample(ex.id, ex.title);
   select.onchange = () => {
     if (select.value !== "own") return pick(select.value);
-    select.value = chips.querySelector('[aria-checked="true"]')?.getAttribute("data-example") ?? EXAMPLES[0]!.id;
-    void openFile();
+    void startBlank();
   };
   $("examples").hidden = false;
   hintState.site = true;
@@ -335,7 +334,16 @@ function wireSite(engine: Engine, editor: Editor, toasts: Toasts, state: { custo
     closeMenu();
     void openFile();
   };
-  own.onclick = () => void openFile();
+  const startBlank = async (): Promise<void> => {
+    await replaceWith("Your diagram", "", "Started a blank diagram");
+    panel.setOpen(true);
+    $("code-input").focus();
+  };
+  own.onclick = () => void startBlank();
+  $("empty-upload").onclick = () => void openFile();
+  editor.on("view", (view) => {
+    $("empty").hidden = view.shapes.length > 0;
+  });
   const overlay = $("drop");
   let depth = 0;
   const carriesFiles = (e: DragEvent): boolean => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
@@ -456,7 +464,7 @@ export async function start(): Promise<void> {
     return;
   }
   const shared = await decodeShare(location.hash);
-  wireSite(engine, editor, toasts, { custom: shared !== null });
+  wireSite(engine, editor, toasts, panel, { custom: shared !== null });
   showLoading("Laying out the diagram…", null);
   await engine.open?.(shared ?? EXAMPLES[0]!.source);
   showHint();
